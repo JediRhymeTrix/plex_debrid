@@ -1010,11 +1010,15 @@ class media:
                     # Get trakt 'Latest HD/4k Releases' Lists to accept early releases
                     match = False
                     if trakt.early_releases == "true":
-                        trakt_lists, header = trakt.get(
-                            'https://api.trakt.tv/movies/' + str(self.ids.trakt) + '/lists/personal/popular')
-                        for trakt_list in trakt_lists:
-                            if regex.search(r'(latest|new).*?(releases)', trakt_list.name, regex.I):
-                                match = True
+                        try:
+                            trakt_lists, header = trakt.get(
+                                'https://api.trakt.tv/movies/' + str(self.ids.trakt) + '/lists/personal/popular')
+                            if isinstance(trakt_lists, list):
+                                for trakt_list in trakt_lists:
+                                    if regex.search(r'(latest|new).*?(releases)', trakt_list.name, regex.I):
+                                        match = True
+                        except:
+                            ui_print("[trakt] warning: could not get public lists for movie '" + self.query() + "'. Skipping early release check.", debug=ui_settings.debug)
                     # if release_date and delay have passed or the movie was released early
                     if match:
                         ui_print("item: '" + self.query() +
