@@ -57,6 +57,7 @@ This is a work in progress, and im not a professional programmer. shits not read
    - <img src="https://www.premiumize.me/favicon-16x16.png" height="16"> **[Premiumize](https://www.premiumize.me/)**
    - <img src="https://cdn.alldebrid.com/lib/images/default/favicon.png" height="16"> **[AllDebrid](https://alldebrid.com/)**
    - <img src="https://cdn.debrid-link.com/favicon.ico?i=2" height="16"> **[DebridLink](https://debrid-link.com/)**
+   - <img src="https://torbox.app/favicon.ico" height="16"> **[TorBox](https://torbox.app/)**
    - <img src="https://app.put.io/assets/favicon-32x32.png" height="16"> **[PUT.io (no check for cached releases)](https://put.io/)**
 - Refreshing your personal media server libraries (fully or partially) to make the content available to watch for:
    - <img src="https://app.plex.tv/desktop/favicon.ico" height="16"> **[Plex](https://plex.tv/)**
@@ -496,6 +497,7 @@ If github is not your cup of tea;
 ### :arrow_down_small: Debrid Services:
 
 *The services that plex_debrid can use to download torrents. You can add any combination of services.* 
+>  - **TorBox** is supported via its API key. Get your API key from your TorBox account settings (https://torbox.app/settings) and enter it in plex_debrid under '/Settings/Debrid Services/TorBox API Key'. TorBox supports checking for cached torrents, instant direct-download links for cached content and adding uncached torrents for downloading.
 
 ><details>
 >  <summary><b><u>Debrid services:</u></b></summary>

@@ -297,6 +297,15 @@ class setting:
                         print()
                         print("Looks like the api key does not work. Please enter a valid api key.")
                         print()
+                elif self.name == 'TorBox API Key':
+                    url = 'https://api.torbox.app/v1/api/user/me'
+                    response = debrid.services.torbox.session.get(url, headers={'Authorization': 'Bearer ' + console_input})
+                    if response.status_code == 200:
+                        working = True
+                    else:
+                        print()
+                        print("Looks like the api key does not work. Please enter a valid api key.")
+                        print()
                 else:
                     working = True
 
@@ -389,7 +398,7 @@ settings_list = [
             'Tracker specific Debrid Services',
             [
                 'Please specify what tracker to look for by providing a regex match group: ',
-                'Please specify what debrid service should be used for a matching tracker (enter "RD","PM","AD","PUT", or "DL"): ',
+                'Please specify what debrid service should be used for a matching tracker (enter "RD","PM","AD","PUT","DL", or "TB"): ',
             ],
             debrid, 'tracker',
             entry="rule",
@@ -406,6 +415,8 @@ settings_list = [
         setting('Put.io API Key',
                 'Please open your favorite browser, log into your put.io account and open "http://put.io/link". Enter this code: ',
                 debrid.services.putio, 'api_key', hidden=True, oauth=True),
+        setting('TorBox API Key', 'Please enter your TorBox API Key: ', debrid.services.torbox, 'api_key',
+                hidden=True),
     ]
         ],
     ['UI Settings', [
