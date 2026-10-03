@@ -40,7 +40,7 @@ def get(url, timeout=60):
 
 def post(url, data):
     try:
-        response = session.post(url, data=data, headers=headers)
+        response = session.post(url, data=data, headers=headers, timeout=60)
         logerror(response)
         response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
         return response
@@ -488,11 +488,11 @@ class library(classes.library):
                                     time.sleep(0.25)
                             url = library.url + '/library/sections/' + section + '/refresh?path='+folder+'&X-Plex-Token=' + users[0][1]
                             ui_print("refreshing plex via url: " + url, debug=ui_settings.debug)
-                            response = session.get(url)
+                            response = session.get(url, timeout=60)
                     else:
                         url = library.url + '/library/sections/' + section + '/refresh?X-Plex-Token=' + users[0][1]
                         ui_print("refreshing plex via url: " + url, debug=ui_settings.debug)
-                        response = session.get(url)
+                        response = session.get(url, timeout=60)
             except Exception as e:
                 ui_print(str(e), debug=ui_settings.debug)
 

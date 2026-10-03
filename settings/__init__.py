@@ -299,7 +299,7 @@ class setting:
                         print()
                 elif self.name == 'TorBox API Key':
                     url = 'https://api.torbox.app/v1/api/user/me'
-                    response = debrid.services.torbox.session.get(url, headers={'Authorization': 'Bearer ' + console_input})
+                    response = debrid.services.torbox.session.get(url, headers={'Authorization': 'Bearer ' + console_input}, timeout=60)
                     if response.status_code == 200:
                         working = True
                     else:

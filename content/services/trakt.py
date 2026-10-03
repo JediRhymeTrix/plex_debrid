@@ -164,7 +164,7 @@ def get(url):
         response = session.get(url, headers={
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36',
             'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
-            "Authorization": "Bearer " + current_user[1]})
+            "Authorization": "Bearer " + current_user[1]}, timeout=60)
         logerror(response)
         header = response.headers
         response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
@@ -184,7 +184,7 @@ def post(url, data, auth=False):
             headers={
                 'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
                 "Authorization": "Bearer " + current_user[1]}
-        response = session.post(url, headers=headers, data=data)
+        response = session.post(url, headers=headers, data=data, timeout=60)
         logerror(response)
         response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
         time.sleep(1.1)

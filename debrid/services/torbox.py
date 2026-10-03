@@ -30,7 +30,7 @@ def get(url):
         'Authorization': 'Bearer ' + api_key}
     response = None
     try:
-        response = session.get(url, headers=headers)
+        response = session.get(url, headers=headers, timeout=60)
         logerror(response)
         response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
     except Exception as e:
@@ -45,7 +45,7 @@ def post(url, data):
         'Authorization': 'Bearer ' + api_key}
     response = None
     try:
-        response = session.post(url, headers=headers, data=data)
+        response = session.post(url, headers=headers, data=data, timeout=60)
         logerror(response)
         response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
     except Exception as e:
@@ -61,7 +61,7 @@ def post(url, data):
 def delete(torrent_id):
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36','Authorization': 'Bearer ' + api_key}
     try:
-        session.post(base_url + '/torrents/controltorrent', headers=headers, json={'operation': 'delete', 'torrent_id': torrent_id})
+        session.post(base_url + '/torrents/controltorrent', headers=headers, json={'operation': 'delete', 'torrent_id': torrent_id}, timeout=60)
     except Exception as e:
         ui_print("[torbox] error: (delete exception): " + str(e), debug=ui_settings.debug)
     return None
@@ -70,7 +70,7 @@ def delete(torrent_id):
 def requestdl(torrent_id, file_id):
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36','Authorization': 'Bearer ' + api_key}
     try:
-        response = session.get(base_url + '/torrents/requestdl?torrent_id=' + str(torrent_id) + '&file_id=' + str(file_id) + '&token=' + api_key, headers=headers)
+        response = session.get(base_url + '/torrents/requestdl?torrent_id=' + str(torrent_id) + '&file_id=' + str(file_id) + '&token=' + api_key, headers=headers, timeout=60)
         if response.status_code == 200:
             data = json.loads(response.content)
             if data.get('success') and data.get('data'):

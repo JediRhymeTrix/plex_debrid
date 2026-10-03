@@ -19,7 +19,7 @@ def scrape(query, altquery):
         url = 'http://1337x.to/search/' + str(query) + '/1/'
         response = None
         try:
-            response = session.get(url, headers=headers)
+            response = session.get(url, headers=headers, timeout=60)
             soup = BeautifulSoup(response.content, 'html.parser')
             torrentList = soup.select('a[href*="/torrent/"]')
             sizeList = soup.select('td.coll-4')
@@ -32,7 +32,7 @@ def scrape(query, altquery):
                     if regex.match(r'(' + altquery.replace('.', '\.').replace("\.*", ".*") + ')', title,
                                     regex.I):
                         link = torrent['href']
-                        response = session.get('http://1337x.to' + link, headers=headers)
+                        response = session.get('http://1337x.to' + link, headers=headers, timeout=60)
                         soup = BeautifulSoup(response.content, 'html.parser')
                         download = soup.select('a[href^="magnet"]')[0]['href']
                         size = sizeList[count].contents[0]
