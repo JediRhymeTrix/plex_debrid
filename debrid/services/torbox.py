@@ -88,6 +88,106 @@ def get_torrent(torrent_id, retries=5, wait=2):
         time.sleep(wait)
     return None
 
+# get a usenet download from the torbox usenet list by its id. returns None if it could not be found.
+def get_usenet(usenet_id, retries=5, wait=2):
+    for _ in range(retries):
+        response = get(base_url + '/usenet/mylist?id=' + str(usenet_id) + '&bypass_cache=true')
+        if response is not None and getattr(response, 'success', False) and response.data is not None:
+            data = response.data
+            if isinstance(data, list):
+                for row in data:
+                    if int(getattr(row, 'id', 0)) == int(usenet_id):
+                        return row
+            else:
+                return data
+        time.sleep(wait)
+    return None
+
+# get a direct download link for a file of a usenet download
+def requestdl_usenet(usenet_id, file_id):
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36','Authorization': 'Bearer ' + api_key}
+    try:
+        response = session.get(base_url + '/usenet/requestdl?usenet_id=' + str(usenet_id) + '&file_id=' + str(file_id), headers=headers, timeout=60)
+        if response.status_code == 200:
+            data = json.loads(response.content)
+            if data.get('success') and data.get('data'):
+                return data['data']
+    except Exception as e:
+        ui_print("[torbox] error: (usenet requestdl exception): " + str(e), debug=ui_settings.debug)
+    return None
+
+# delete a usenet download from the torbox usenet list
+def delete_usenet(usenet_id):
+    try:
+        requests.post(base_url + '/usenet/controlusenetdownload', headers={'Authorization': 'Bearer ' + api_key, 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}, json={'operation': 'delete', 'usenet_id': usenet_id}, timeout=60)
+    except Exception as e:
+        ui_print("[torbox] error: (usenet delete exception): " + str(e), debug=ui_settings.debug)
+
+# add an nzb release to torbox as a usenet download. returns True if the release was added or downloaded.
+def download_usenet(release, element, wanted):
+    import debrid as db
+    usenet_id = None
+    try:
+        nzb_url = str(release.download[0])
+        response = session.get(nzb_url, timeout=60)
+        if response.status_code != 200 or len(response.content) < 100:
+            ui_print('[torbox] error: could not retrieve nzb for release: ' + release.title, ui_settings.debug)
+            return False
+        files = {'file': (releases.rename(release.title) + '.nzb', response.content, 'application/x-nzb')}
+        response = requests.post(base_url + '/usenet/createusenetdownload', headers={'Authorization': 'Bearer ' + api_key, 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'}, files=files, data={'name': release.title}, timeout=60)
+        if response.status_code != 200:
+            ui_print('[torbox] error: could not add nzb for release: ' + release.title, ui_settings.debug)
+            return False
+        data = json.loads(response.content)
+        if not data.get('success'):
+            ui_print('[torbox] error: could not add nzb for release: ' + release.title + ' - ' + str(data.get('detail')), ui_settings.debug)
+            return False
+        usenet_id = data.get('data', {}).get('usenetdownload_id')
+    except Exception as e:
+        ui_print('[torbox] error: (usenet add exception): ' + str(e), ui_settings.debug)
+        return False
+    if usenet_id is None:
+        return False
+    # wait for torbox to fetch the release from usenet, then hand out direct links for the wanted files
+    wanted_patterns = list(zip(wanted, [regex.compile(r'(' + key + ')', regex.IGNORECASE) for key in wanted]))
+    unwanted_patterns = list(zip(releases.sort.unwanted, [regex.compile(r'(' + key + ')', regex.IGNORECASE) for key in releases.sort.unwanted]))
+    for _ in range(12):
+        time.sleep(5)
+        usenet = get_usenet(usenet_id)
+        if usenet is None or not bool(getattr(usenet, 'download_finished', False)):
+            continue
+        # the release is complete on torbox - collect links for the wanted files
+        release.download = []
+        for file_ in getattr(usenet, 'files', []):
+            name = getattr(file_, 'name', '') or ''
+            fid = getattr(file_, 'id', 0)
+            wanted = False
+            unwanted = False
+            for key, wanted_pattern in wanted_patterns:
+                if wanted_pattern.search(name):
+                    wanted = True
+                    break
+            if not wanted:
+                for key, unwanted_pattern in unwanted_patterns:
+                    if unwanted_pattern.search(name) or name.endswith('.exe') or name.endswith('.txt'):
+                        unwanted = True
+                        break
+            if wanted or not unwanted:
+                link = requestdl_usenet(usenet_id, fid)
+                if link is not None:
+                    release.download += [link]
+        if len(release.download) > 0:
+            ui_print('[torbox] adding usenet release: ' + release.title)
+            return True
+        ui_print('[torbox] error: usenet release: "' + release.title + '" does not contain any of the wanted files.', ui_settings.debug)
+        delete_usenet(usenet_id)
+        return False
+    # torbox is still fetching the release - treat it like an uncached torrent that continues downloading on torbox
+    if hasattr(element, 'version'):
+        db.downloading += [element.query() + ' [' + element.version.name + ']']
+    ui_print('[torbox] adding uncached usenet release: ' + release.title)
+    return True
+
 # Object classes
 class file:
     def __init__(self, id, name, size, wanted_list, unwanted_list):
@@ -140,6 +240,9 @@ def download(element, stream=True, query='', force=False):
     for release in cached[:]:
         # if release matches query
         if regex.match(query, release.title,regex.I) or force:
+            if release.type == 'usenet':
+                # nzb release: add it to torbox as a usenet download
+                return download_usenet(release, element, wanted)
             # post magnet to torbox
             try:
                 response = post(base_url + '/torrents/createtorrent', {'magnet': str(release.download[0]), 'seed': 2, 'allow_zip': False, 'name': release.title})
@@ -220,6 +323,11 @@ def check(element, force=False):
 
     hashes = []
     for release in element.Releases[:]:
+        if release.type == 'usenet':
+            # usenet releases are nzb files which torbox can always fetch - mark them cached for torbox
+            if not 'TB' in release.cached:
+                release.cached += ['TB']
+            continue
         if len(release.hash) == 40:
             hashes += [release.hash]
         else:

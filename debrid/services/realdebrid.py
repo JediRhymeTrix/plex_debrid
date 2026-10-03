@@ -185,6 +185,9 @@ def download(element, stream=True, query='', force=False):
                     response = post('https://api.real-debrid.com/rest/1.0/torrents/addMagnet',{'magnet': release.download[0]})
                     time.sleep(0.1)
                     post('https://api.real-debrid.com/rest/1.0/torrents/selectFiles/' + str(response.id),{'files': 'all'})
+                    response = get('https://api.real-debrid.com/rest/1.0/torrents/info/' + response.id)
+                    for link in response.links:
+                        response = post('https://api.real-debrid.com/rest/1.0/unrestrict/link',{'link': link})
                     ui_print('[realdebrid] adding uncached release: ' + release.title)
                     return True
                 except:
@@ -205,6 +208,9 @@ def check(element, force=False):
 
     hashes = []
     for release in element.Releases[:]:
+        if release.type == 'usenet':
+            # usenet releases are nzb files which real debrid cannot download - leave them for other services
+            continue
         if len(release.hash) == 40:
             hashes += [release.hash]
         else:
