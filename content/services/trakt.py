@@ -354,6 +354,7 @@ class watchlist(classes.watchlist):
         global current_user
         global users
         refresh = False
+        fetch_failed = False
         new_watchlist = []
         for list in lists:
             list_type = "public"
@@ -368,6 +369,9 @@ class watchlist(classes.watchlist):
             if list_type == "watchlist":
                 try:
                     watchlist_items, header = get('https://api.trakt.tv/users/me/watchlist/movies,shows?extended=full')
+                    if watchlist_items is None:
+                        fetch_failed = True
+                        continue
                     for element in watchlist_items:
                         if hasattr(element, 'show'):
                             element.show.type = 'show'
@@ -397,17 +401,24 @@ class watchlist(classes.watchlist):
                             new_watchlist += [element.movie]
                 except Exception as e:
                     ui_print("[trakt error]: (exception): " + str(e), debug=ui_settings.debug)
+                    fetch_failed = True
                     continue
             if list_type == "private":
                 try:
                     response, header = get('https://api.trakt.tv/users/me/lists')
                     p_list_id = None
+                    if response is None:
+                        fetch_failed = True
+                        continue
                     for p_list in response:
                         if list == user[0] + "'s private list: " + p_list.name:
                             p_list_id = p_list.ids.trakt
                             break
                     if not p_list_id == None:
                         watchlist_items, header = get('https://api.trakt.tv/users/me/lists/'+str(p_list_id)+'/items/movies,shows?extended=full')
+                        if watchlist_items is None:
+                            fetch_failed = True
+                            continue
                         for element in watchlist_items:
                             if hasattr(element, 'show'):
                                 element.show.type = 'show'
@@ -437,7 +448,11 @@ class watchlist(classes.watchlist):
                                 new_watchlist += [element.movie]
                 except Exception as e:
                     ui_print("[trakt error]: (exception): " + str(e), debug=ui_settings.debug)
+                    fetch_failed = True
                     continue
+        if fetch_failed:
+            ui_print("[trakt error]: update incomplete, keeping current data until all trakt lists sync successfully.", debug=ui_settings.debug)
+            return refresh
         for element in self.data[:]:
             if not element in new_watchlist:
                 self.data.remove(element)
