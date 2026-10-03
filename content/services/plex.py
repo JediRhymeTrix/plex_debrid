@@ -178,7 +178,9 @@ class season(classes.media):
                 if library.ignore.user == user[0]:
                     token = user[1]
         viewCount = 0
-        while len(self.Episodes) < self.leafCount:
+        attempts = 0
+        while len(self.Episodes) < self.leafCount and attempts < 10:
+            attempts += 1
             url = 'https://discover.provider.plex.tv/library/metadata/' + self.ratingKey + '/children?includeUserState=1&X-Plex-Container-Size=200&X-Plex-Container-Start=' + str(len(self.Episodes)) + '&X-Plex-Token=' + token
             response = get(url)
             if not response == None:
@@ -198,6 +200,8 @@ class season(classes.media):
                     self.viewedLeafCount = viewCount
             else:
                 time.sleep(1)
+        if len(self.Episodes) < self.leafCount:
+            ui_print("[plex] error: could not reach plex discover after 10 attempts, season episodes incomplete: " + str(self.ratingKey), debug=ui_settings.debug)
 
 class episode(classes.media):
     def __init__(self, other):
@@ -224,7 +228,9 @@ class show(classes.media):
                 if library.ignore.user == user[0]:
                     token = user[1]
         success = False
-        while not success:
+        attempts = 0
+        while not success and attempts < 10:
+            attempts += 1
             url = 'https://discover.provider.plex.tv/library/metadata/' + ratingKey + '?includeUserState=1&X-Plex-Token=' + token
             response = get(url)
             if not response == None:
@@ -266,6 +272,9 @@ class show(classes.media):
                     time.sleep(1)
             else:
                 time.sleep(1)
+        if not success:
+            ui_print("[plex] error: could not reach plex discover after 10 attempts, skipping show: " + str(ratingKey))
+            raise Exception("plex discover unreachable")
         if not hasattr(self,"watchlistedAt"):
             if hasattr(self,"addedAt"):
                 self.watchlistedAt = self.addedAt
