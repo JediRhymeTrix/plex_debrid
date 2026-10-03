@@ -329,6 +329,7 @@ class library(classes.library):
         sections = []
         partial = "true"
         delay = "2"
+        enabled = "true"
 
         def setup(cls, new=False):
             ui_cls("Options/Settings/Library Services/Library update services")
@@ -498,6 +499,9 @@ class library(classes.library):
 
         def __new__(cls, element):
             try:
+                if not cls.enabled == "true":
+                    ui_print("plex library refresh is disabled, skipping plex library refresh", debug=ui_settings.debug)
+                    return
                 names = []
                 element_type = ("show" if element.type in ["show","season","episode"] else "movie")
                 url = library.url + '/library/sections/?X-Plex-Token=' + users[0][1]
