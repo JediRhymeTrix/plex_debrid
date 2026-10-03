@@ -509,6 +509,12 @@ class watchlist(classes.watchlist):
 class season(classes.media):
     def __init__(self, other):
         self.watchlist = watchlist
+        # some trakt responses include a 'released' date string, which would shadow the media.released() method
+        try:
+            released_date = other.released
+            delattr(other, 'released')
+        except:
+            released_date = None
         self.__dict__.update(other.__dict__)
         self.EID = setEID(self)
         self.Episodes = []
@@ -521,9 +527,9 @@ class season(classes.media):
                 if not self.first_aired == None:
                     self.originallyAvailableAt = datetime.datetime.strptime(self.first_aired,'%Y-%m-%dT%H:%M:%S.000Z').strftime('%Y-%m-%d')
                 else:
-                    self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+                    self.originallyAvailableAt = released_date if released_date else datetime.datetime.utcnow().strftime('%Y-%m-%d')
             else:
-                self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+                self.originallyAvailableAt = released_date if released_date else datetime.datetime.utcnow().strftime('%Y-%m-%d')
         except:
             self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         self.index = self.number
@@ -543,6 +549,12 @@ class season(classes.media):
 class episode(classes.media):
     def __init__(self, other):
         self.watchlist = watchlist
+        # some trakt responses include a 'released' date string, which would shadow the media.released() method
+        try:
+            released_date = other.released
+            delattr(other, 'released')
+        except:
+            released_date = None
         self.__dict__.update(other.__dict__)
         self.EID = setEID(self)
         if hasattr(self, 'ids.trakt'):
@@ -556,9 +568,9 @@ class episode(classes.media):
                                                                             '%Y-%m-%dT%H:%M:%S.000Z').strftime(
                         '%Y-%m-%d')
                 else:
-                    self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+                    self.originallyAvailableAt = released_date if released_date else datetime.datetime.utcnow().strftime('%Y-%m-%d')
             else:
-                self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+                self.originallyAvailableAt = released_date if released_date else datetime.datetime.utcnow().strftime('%Y-%m-%d')
         except:
             self.originallyAvailableAt = datetime.datetime.utcnow().strftime('%Y-%m-%d')
         self.index = self.number
