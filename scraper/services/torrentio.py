@@ -8,16 +8,23 @@ name = "torrentio"
 default_opts = "https://torrentio.strem.fun/sort=qualitysize|qualityfilter=480p,scr,cam/manifest.json"
 
 session = custom_session()
+# torrentio sits behind cloudflare bot protection which rejects the default
+# python-requests user agent with a 403 challenge page - send a browser UA
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'})
 
 
 def get(url):
-    try:
-        response = session.get(url, timeout=60)
-        response = json.loads(
-            response.content, object_hook=lambda d: SimpleNamespace(**d))
-        return response
-    except:
-        return None
+    for attempt in range(3):
+        try:
+            response = session.get(url, timeout=60)
+            response = json.loads(
+                response.content, object_hook=lambda d: SimpleNamespace(**d))
+            return response
+        except Exception as e:
+            ui_print('[torrentio] error: (exception): ' + str(e), debug=ui_settings.debug)
+            time.sleep(2)
+    return None
 
 
 def setup(cls, new=False):
@@ -67,8 +74,13 @@ def scrape(query, altquery):
         altquery = query
     type = ("show" if regex.search(
         r'(S[0-9]|complete|S\?[0-9])', altquery, regex.I) else "movie")
-    opts = default_opts.split(
-        "/")[-2] if default_opts.endswith("manifest.json") else ""
+    opts = ""
+    if default_opts.endswith("manifest.json"):
+        segments = default_opts.split("/")
+        # manifest url format is https://host/<options>/manifest.json;
+        # without an options segment the segment before manifest.json is just the host
+        if len(segments) > 4:
+            opts = segments[-2]
     if type == "show":
         s = (regex.search(r'(?<=S)([0-9]+)', altquery, regex.I).group()
              if regex.search(r'(?<=S)([0-9]+)', altquery, regex.I) else None)
