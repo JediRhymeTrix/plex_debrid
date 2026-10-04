@@ -111,7 +111,11 @@ class setting:
                                     print("It seems that this authentification service could not be reached. Please try again at a later time.")
                                     return
                                 print(prompt + str(user_code))
-                                edit += [self.cls.oauth(device_code)]
+                                if self.name == 'Trakt users':
+                                    access_token, refresh_token, created_at, expires_in = self.cls.oauth(device_code)
+                                    edit = edit[:1] + [access_token, refresh_token, created_at, expires_in]
+                                else:
+                                    edit += [self.cls.oauth(device_code)]
                             else:
                                 edit += [input(prompt)]
                         lists += [edit]
@@ -176,7 +180,11 @@ class setting:
                                             if "code" in prompt:
                                                 device_code, user_code = self.cls.oauth()
                                                 print(prompt + str(user_code))
-                                                edit += [self.cls.oauth(device_code)]
+                                                if self.name == 'Trakt users':
+                                                    access_token, refresh_token, created_at, expires_in = self.cls.oauth(device_code)
+                                                    edit = edit[:1] + [access_token, refresh_token, created_at, expires_in]
+                                                else:
+                                                    edit += [self.cls.oauth(device_code)]
                                             else:
                                                 edit += [input(prompt)]
                                         lists[int(index) - 1] = edit
@@ -252,7 +260,11 @@ class setting:
                                     print("it seems this authentification service could not be reached right now. Please try again later.")
                                     return
                                 print(prompt + str(user_code))
-                                edit += [self.cls.oauth(device_code)]
+                                if self.name == 'Trakt users':
+                                    access_token, refresh_token, created_at, expires_in = self.cls.oauth(device_code)
+                                    edit = edit[:1] + [access_token, refresh_token, created_at, expires_in]
+                                else:
+                                    edit += [self.cls.oauth(device_code)]
                             else:
                                 edit += [input(prompt)]
                         lists += [edit]

@@ -152,46 +152,109 @@ def setup(self, new=False):
                 setting.setup()
         lists = [users[0][0] + "'s watchlist"]
 
+# throttle repeated 401 messages to once per 5 minutes per user
+last_401_log = {}
+last_refresh_attempt = {}
+
+# refresh a users access token using the stored refresh token. returns True on success.
+def refresh(user):
+    global current_user
+    import time as _time
+    now = _time.time()
+    if len(user) < 3 or not user[2]:
+        if now - last_refresh_attempt.get(user[0], 0) > 300:
+            last_refresh_attempt[user[0]] = now
+            ui_print("[trakt] error: (401 unauthorized): no refresh token stored for user '" + user[0] + "'. Re-authorize plex_debrid once for this trakt user - tokens will refresh automatically afterwards.")
+        return False
+    if now - last_refresh_attempt.get(user[0], 0) < 60:
+        return False
+    last_refresh_attempt[user[0]] = now
+    ui_print("[trakt] access token expired for user '" + user[0] + "' - refreshing token ...")
+    response = post(url='https://api.trakt.tv/oauth/token', data=json.dumps({'refresh_token': user[2], 'client_id': client_id, 'client_secret': client_secret, 'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob', 'grant_type': 'refresh_token'}), auth=True)
+    if response is None or not hasattr(response, 'access_token'):
+        ui_print("[trakt] error: could not refresh access token for user '" + user[0] + "'. Re-authorize plex_debrid for this trakt user.")
+        return False
+    user[1] = response.access_token
+    if getattr(response, 'refresh_token', ''):
+        user[2] = response.refresh_token
+    if len(user) > 2:
+        if len(user) < 4:
+            user.append(getattr(response, 'created_at', 0))
+        else:
+            user[3] = getattr(response, 'created_at', 0)
+        if len(user) < 5:
+            user.append(getattr(response, 'expires_in', 0))
+        else:
+            user[4] = getattr(response, 'expires_in', 0)
+    ui_print("[trakt] access token refreshed successfully for user '" + user[0] + "'.")
+    # persist the renewed tokens
+    try:
+        from ui import save as ui_save
+        ui_save(doprint=False)
+    except Exception as e:
+        ui_print("[trakt] warning: could not save renewed tokens to settings file: " + str(e), debug=ui_settings.debug)
+    return True
+
 def logerror(response):
     if not response.status_code == 200:
         ui_print("[trakt] error: " + str(response.content), debug=ui_settings.debug)
     if response.status_code == 401:
-        ui_print("[trakt] error: (401 unauthorized): trakt api key for user '" + current_user[
-            0] + "' does not seem to work. Consider re-authorizing plex_debrid for this trakt user.")
+        import time as _time
+        now = _time.time()
+        if now - last_401_log.get(current_user[0], 0) > 300:
+            last_401_log[current_user[0]] = now
+            ui_print("[trakt] error: (401 unauthorized): trakt api key for user '" + current_user[
+                0] + "' does not seem to work. Consider re-authorizing plex_debrid for this trakt user.")
 
 def get(url):
-    try:
-        response = session.get(url, headers={
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36',
-            'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
-            "Authorization": "Bearer " + current_user[1]}, timeout=60)
-        logerror(response)
-        header = response.headers
-        response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
-    except:
-        response = None
-        header = None
-    return response, header
-
+    for attempt in range(2):
+        try:
+            response = session.get(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36',
+                'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
+                "Authorization": "Bearer " + current_user[1]}, timeout=60)
+            if response.status_code == 401 and attempt == 0:
+                if refresh(current_user):
+                    continue
+                return None, None
+            logerror(response)
+            header = response.headers
+            response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
+            return response, header
+        except Exception:
+            if attempt == 0:
+                continue
+            response = None
+            header = None
+            return response, header
+    return None, None
 
 def post(url, data, auth=False):
-    try:
-        if auth:
-            headers = {
-                'Content-type': "application/json"
-            }
-        else:
-            headers={
-                'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
-                "Authorization": "Bearer " + current_user[1]}
-        response = session.post(url, headers=headers, data=data, timeout=60)
-        logerror(response)
-        response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
-        time.sleep(1.1)
-    except:
-        response = None
-    return response
-
+    for attempt in range(2):
+        try:
+            if auth:
+                headers = {
+                    'Content-type': "application/json"
+                }
+            else:
+                headers = {
+                    'Content-type': "application/json", "trakt-api-key": client_id, "trakt-api-version": "2",
+                    "Authorization": "Bearer " + current_user[1]}
+            response = session.post(url, headers=headers, data=data, timeout=60)
+            if response.status_code == 401 and not auth and attempt == 0:
+                if refresh(current_user):
+                    continue
+                return None
+            logerror(response)
+            response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
+            time.sleep(1.1)
+            return response
+        except Exception:
+            if attempt == 0:
+                continue
+            response = None
+            return response
+    return None
 
 def oauth(code=""):
     if code == "":
@@ -203,11 +266,20 @@ def oauth(code=""):
             time.sleep(5)
     else:
         response = None
+        polls = 0
         while response is None:
+            polls += 1
+            if polls > 120:
+                print("trakt.tv device code expired or could not be verified. Please try again.")
+                return None, None
             response = post(url='https://api.trakt.tv/oauth/device/token', data=json.dumps(
                 {'code': code, 'client_id': client_id, 'client_secret': client_secret}),auth=True)
-            time.sleep(1)
-        return response.access_token
+            time.sleep(5)
+        # return the full token set so the refresh token can be stored for automatic renewal
+        return (response.access_token,
+                getattr(response, 'refresh_token', ''),
+                getattr(response, 'created_at', 0),
+                getattr(response, 'expires_in', 0))
 
 
 def setEID(self):
@@ -223,6 +295,7 @@ def setEID(self):
             if not self.ids.tvdb == None:
                 EID += ['tvdb://' + str(self.ids.tvdb)]
     return EID
+
 
 class watchlist(classes.watchlist):
     autoremove = "movie"
