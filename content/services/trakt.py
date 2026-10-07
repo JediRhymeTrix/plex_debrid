@@ -566,11 +566,15 @@ class watchlist(classes.watchlist):
         data = {'movies': movies, 'shows': shows}
         current_user = user
         try:
-            response = post('https://api.trakt.tv/sync/watchlist/remove', json.dumps(data, default=lambda o: o.__dict__))
-            if hasattr(response,"deleted"):
-                if response.deleted.movies > 0 or response.deleted.shows > 0:
-                    ui_print('[trakt] item: "' + element.title + '" removed from ' + user[0] + '`s watchlist')
-                    deleted = True
+            # auto-remove must only touch lists that are actually monitored: the
+            # trakt watchlist is only removed from when it is configured as a
+            # monitored list ("<user>'s watchlist" in the trakt lists setting).
+            if user[0] + "'s watchlist" in lists:
+                response = post('https://api.trakt.tv/sync/watchlist/remove', json.dumps(data, default=lambda o: o.__dict__))
+                if hasattr(response,"deleted"):
+                    if response.deleted.movies > 0 or response.deleted.shows > 0:
+                        ui_print('[trakt] item: "' + element.title + '" removed from ' + user[0] + '`s watchlist')
+                        deleted = True
             p_lists = []
             for list in lists:
                 if list.startswith(user[0] + "'s private list: "):
