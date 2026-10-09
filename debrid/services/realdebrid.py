@@ -32,7 +32,10 @@ def logerror(response):
     if response.status_code == 401:
         ui_print("[realdebrid] error: (401 unauthorized): realdebrid api key does not seem to work. check your realdebrid settings.")
     if response.status_code == 403:
-        ui_print("[realdebrid] error: (403 unauthorized): You may have attempted to add an infringing torrent or your realdebrid account is locked or you dont have premium.")
+        if b'disabled_endpoint' in response.content:
+            ui_print("[realdebrid] note: (403): real-debrid has disabled this endpoint (error_code 37) - skipping.")
+        else:
+            ui_print("[realdebrid] error: (403 unauthorized): You may have attempted to add an infringing torrent or your realdebrid account is locked or you dont have premium.")
 
 # Get Function
 def get(url):
