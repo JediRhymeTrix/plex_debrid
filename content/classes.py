@@ -960,14 +960,15 @@ class media:
                     score += 500
                 if re.search(r'(3D)', file_name, re.I):
                     score += 100
-                candidates += [(score, file_path)]
+                candidates += [(score, file_path, is_imax, is_3d)]
         if len(candidates) < 2:
             return
         candidates.sort(key=lambda x: x[0], reverse=True)
         keeper_score = candidates[0][0]
         keeper_is_imax = candidates[0][2]
-        for score, file_path, is_imax in candidates[1:]:
-            if is_imax or keeper_is_imax:
+        keeper_is_3d = candidates[0][3]
+        for score, file_path, is_imax, is_3d in candidates[1:]:
+            if is_imax or is_3d or keeper_is_imax or keeper_is_3d:
                 continue
             if score < keeper_score:
                 try:
