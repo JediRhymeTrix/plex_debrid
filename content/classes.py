@@ -949,6 +949,7 @@ class media:
                 file_path = Part.file
                 file_name = file_path.replace("\\", "/").split("/")[-1].lower()
                 is_imax = bool(re.search(r'(IMAX)', file_name, re.I))
+                is_matte = bool(re.search(r'(OPEN[ .-]?MATTE|MATTE)', file_name, re.I))
                 score = res * 1000000
                 if re.search(r'(DOVI|DOLBY[ .]?VISION|\bDV\b)', file_name, re.I):
                     score += 4000
@@ -960,15 +961,16 @@ class media:
                     score += 500
                 if re.search(r'(3D)', file_name, re.I):
                     score += 100
-                candidates += [(score, file_path, is_imax, is_3d)]
+                candidates += [(score, file_path, is_imax, is_3d, is_matte)]
         if len(candidates) < 2:
             return
         candidates.sort(key=lambda x: x[0], reverse=True)
         keeper_score = candidates[0][0]
         keeper_is_imax = candidates[0][2]
         keeper_is_3d = candidates[0][3]
-        for score, file_path, is_imax, is_3d in candidates[1:]:
-            if is_imax or is_3d or keeper_is_imax or keeper_is_3d:
+        keeper_is_matte = candidates[0][4]
+        for score, file_path, is_imax, is_3d, is_matte in candidates[1:]:
+            if is_imax or is_3d or is_matte or keeper_is_imax or keeper_is_3d or keeper_is_matte:
                 continue
             if score < keeper_score:
                 try:
@@ -1662,8 +1664,15 @@ class media:
             if len(self.versions()) == 0:
                 ui_print(
                     "error: it seems that no version applies to this media item! nothing will be downloaded. adjust your version settings.", ui_settings.debug)
+            imax_downloaded = False
             for version in self.versions():
                 debrid_uncached = True
+                # Expanded-ratio exclusivity: IMAX is preferred over Open Matte.
+                # When an IMAX cut was already grabbed in this pass, skip the
+                # Open Matte version instead of pulling both.
+                if 'matte' in version.name.lower() and imax_downloaded:
+                    ui_print("[open matte] IMAX cut already grabbed - skipping open matte version for: " + self.query())
+                    continue
                 for i, rule in enumerate(version.rules):
                     if rule[0] == "cache status" and rule[1] == 'requirement' and rule[2] == "cached":
                         debrid_uncached = False
@@ -1678,12 +1687,16 @@ class media:
                     if hasattr(release, "cached") and len(release.cached) > 0:
                         if debrid.download(self, stream=True, force=force):
                             self.downloaded()
+                            if 'imax' in str(release.title).lower():
+                                imax_downloaded = True
                             downloaded += [True]
                             ver_dld = True
                             break
                     elif not self.type == 'show' and debrid_uncached:
                         if debrid.download(self, stream=False, force=force):
                             self.downloaded()
+                            if 'imax' in str(release.title).lower():
+                                imax_downloaded = True
                             debrid.downloading += [self.query() +
                                                    ' [' + self.version.name + ']']
                             downloaded += [True]
