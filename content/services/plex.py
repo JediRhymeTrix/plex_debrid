@@ -891,6 +891,9 @@ class library(classes.library):
                 ui_print('done')
                 ui_print("[plex error]: found incorrectly matched library item : " + item.title + " - this item needs a metadata refresh (open plex webui, find item, open item menu, refresh metadata).")  
         ui_print('done')
+        if classes.media.upgrade_remove_superseded == "true":
+            for item in list_:
+                item.remove_superseded()
         current_library = copy.deepcopy(list_)
         if first_load and updated:
             store.save(current_library,"plex","metadata")       

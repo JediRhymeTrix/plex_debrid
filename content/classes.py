@@ -268,6 +268,16 @@ class media:
 
     ignore_queue = []
     downloaded_versions = []
+    # Library-upgrade pacing: defaults keep the historic every-cycle cadence.
+    # All pacing state is in-memory only - the system stays restart-safe and
+    # stateless (a restart simply re-evaluates; no correctness risk).
+    upgrade_attempts = {}
+    upgrade_delay_episodes = "0"
+    upgrade_interval_episodes = "0"
+    upgrade_delay_movies = "0"
+    upgrade_interval_movies = "0"
+    upgrade_max_age = "0"
+    upgrade_remove_superseded = "false"
 
     def __init__(self, other):
         self.__dict__.update(other.__dict__)
@@ -835,6 +845,127 @@ class media:
                 all_versions.remove(version)
         return len(self.versions()) > 0 and not self.versions() == all_versions
 
+    def get_added_at(self):
+        # Returns the unix timestamp (seconds) when this item was added to the
+        # Plex library (movies/episodes), or None if it cannot be determined.
+        try:
+            import content.services.plex as plex
+            for element in plex.current_library:
+                if self.type == "movie":
+                    if self == element and hasattr(element, "addedAt"):
+                        return float(element.addedAt)
+                elif self.type == "episode":
+                    if element.type == "show":
+                        if any(eid in self.grandparentEID for eid in element.EID):
+                            for season in element.Seasons:
+                                if not hasattr(season, "index"):
+                                    continue
+                                if self.parentIndex == season.index:
+                                    for episode in season.Episodes:
+                                        if self == episode and hasattr(episode, "addedAt"):
+                                            return float(episode.addedAt)
+        except:
+            pass
+        return None
+
+    def upgrade_due(self):
+        # Pacing for re-evaluating COLLECTED content whose versions are still
+        # missing (the upgrade hunt). Movies and episodes run on separate
+        # cycles: episodes are hot (their better releases typically arrive
+        # within hours), movies are patient (their better releases typically
+        # arrive days or weeks later). The defaults ("0"/"0"/"0") keep the
+        # historic every-cycle cadence. All pacing state is in-memory only:
+        # after a restart the next evaluation simply runs again - one extra
+        # scrape at worst, no correctness risk (stateless, restart-safe).
+        now = time.time()
+        if self.type == "movie":
+            delay = media.upgrade_delay_movies
+            interval = media.upgrade_interval_movies
+        else:
+            delay = media.upgrade_delay_episodes
+            interval = media.upgrade_interval_episodes
+        try:
+            delay = float(delay) * 3600
+            interval = float(interval) * 3600
+        except:
+            delay = 0
+            interval = 0
+        try:
+            max_age = float(media.upgrade_max_age) * 86400
+        except:
+            max_age = 0
+        added = self.get_added_at()
+        if added != None:
+            if delay > 0 and now - added < delay:
+                return False
+            if max_age > 0 and now - added > max_age:
+                return False
+        key = self.query() + ' [upgrade]'
+        if interval > 0 and now - media.upgrade_attempts.get(key, 0) < interval:
+            return False
+        media.upgrade_attempts[key] = now
+        return True
+
+    def remove_superseded(self):
+        # Optional cleanup for the library upgrade feature (default "false"):
+        # when Plex reports MULTIPLE file versions for an item and the version
+        # rules clearly rank one above the others, delete the lower-ranked
+        # file(s). Derived purely from live Plex state on every call - no
+        # pending-deletion state is kept, so a crash mid-deletion heals on the
+        # next pass. WARNING: this deletes ANY strictly-dominated duplicate,
+        # including manually kept lower-quality compatibility copies.
+        if media.upgrade_remove_superseded != "true":
+            return
+        if self.type == "show":
+            for season in self.Seasons:
+                season.remove_superseded()
+            return
+        if self.type == "season":
+            for episode in self.Episodes:
+                episode.remove_superseded()
+            return
+        if self.type not in ["movie", "episode"]:
+            return
+        if self.downloading():
+            return
+        if not hasattr(self, "Media"):
+            return
+        import os
+        import re
+        candidates = []
+        for Media in self.Media:
+            res = 0
+            try:
+                res = 2160 if Media.videoResolution == "4k" else int(Media.videoResolution or 0)
+            except:
+                res = 0
+            for Part in Media.Part:
+                file_path = Part.file
+                file_name = file_path.replace("\\", "/").split("/")[-1].lower()
+                score = res * 1000000
+                if re.search(r'(DOVI|DOLBY[ .]?VISION|\bDV\b)', file_name, re.I):
+                    score += 4000
+                if re.search(r'(HDR)', file_name, re.I):
+                    score += 2000
+                if re.search(r'(REMUX|BLURAY|BLU[ .-]?RAY|BDREMUX|FULL[ .]?BD|UHD[ .]?BLU)', file_name, re.I):
+                    score += 1000
+                if re.search(r'(ATMOS|TrueHD|DTS[ .-]?X)', file_name, re.I):
+                    score += 500
+                if re.search(r'(3D)', file_name, re.I):
+                    score += 100
+                candidates += [(score, file_path)]
+        if len(candidates) < 2:
+            return
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        keeper_score = candidates[0][0]
+        for score, file_path in candidates[1:]:
+            if score < keeper_score:
+                try:
+                    os.remove(file_path)
+                    ui_print("[plex] item: \"" + self.title + "\" - removed superseded lower-quality file: " + file_path)
+                except Exception as e:
+                    ui_print("[plex] error: couldnt remove superseded file \"" + file_path + "\": " + str(e), ui_settings.debug)
+
     def set_file_names(self):
         if not library()[0].name == 'Plex Library' or hasattr(self, "upgradable"):
             return
@@ -1136,7 +1267,7 @@ class media:
             for season in Seasons[:]:
                 if (not season.collected(list) or season.version_missing()) and not season.watched() and season.released() and not season.downloading():
                     for episode in season.Episodes[:]:
-                        if (episode.collected(list) and not episode.version_missing()) or episode.watched() or not episode.released() or episode.downloading():
+                        if (episode.collected(list) and (not episode.version_missing() or not episode.upgrade_due())) or episode.watched() or not episode.released() or episode.downloading():
                             season.Episodes.remove(episode)
                 else:
                     if season in Seasons:
@@ -1184,7 +1315,7 @@ class media:
         # set anime info before episodes are removed
         self.isanime()
         if self.type == 'movie':
-            if (len(self.uncollected(library)) > 0 or self.version_missing()) and len(self.versions()) > 0:
+            if (len(self.uncollected(library)) > 0 or (self.version_missing() and self.upgrade_due())) and len(self.versions()) > 0:
                 if self.released() and not self.watched() and not self.downloading():
                     if not hasattr(self, "year") or self.year == None:
                         ui_print("error: media item has no release year.")
