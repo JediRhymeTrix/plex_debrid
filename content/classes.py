@@ -754,12 +754,18 @@ class media:
         # If Trakt is the  collection service, the upgrading of collected content is not possible, since no record of the downloaded file names is kept. return the missing versions from this session.
         if library()[0].name != 'Plex Library':
             return versions
-        # If Plex is the collection service, check if all versions are missing in this session. If not all versions are missing, at least one can still be downloaded normally and no upgrades should be made.
-        if versions != all_versions:
+        # If Plex is the collection service: when at least one version still
+        # needs a normal download, no upgrades should be made. But when EVERY
+        # version was already downloaded this session, the content is fully
+        # collected for now and unmet upgrade rules must keep hunting.
+        if versions != all_versions and not all(
+                self.query() + ' [' + v.name + ']' in media.downloaded_versions for v in all_versions):
             return versions
         # Check if there are any missing versions with upgrade rules for this media item, if not, return all versions.
+        # Evaluate against all_versions: versions downloaded earlier this session
+        # still carry unmet upgrade rules and must keep hunting.
         upgrade_versions = []
-        for version in versions:
+        for version in all_versions:
             for rule in version.rules:
                 if rule[1] == "upgrade":
                     if not self.query() + ' [' + version.name + " upgrade]" in media.downloaded_versions:
