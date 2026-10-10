@@ -948,6 +948,7 @@ class media:
             for Part in Media.Part:
                 file_path = Part.file
                 file_name = file_path.replace("\\", "/").split("/")[-1].lower()
+                is_imax = bool(re.search(r'(IMAX)', file_name, re.I))
                 score = res * 1000000
                 if re.search(r'(DOVI|DOLBY[ .]?VISION|\bDV\b)', file_name, re.I):
                     score += 4000
@@ -964,7 +965,10 @@ class media:
             return
         candidates.sort(key=lambda x: x[0], reverse=True)
         keeper_score = candidates[0][0]
-        for score, file_path in candidates[1:]:
+        keeper_is_imax = candidates[0][2]
+        for score, file_path, is_imax in candidates[1:]:
+            if is_imax or keeper_is_imax:
+                continue
             if score < keeper_score:
                 try:
                     os.remove(file_path)
