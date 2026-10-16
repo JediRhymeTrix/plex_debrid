@@ -891,6 +891,10 @@ class library(classes.library):
                 ui_print('done')
                 ui_print("[plex error]: found incorrectly matched library item : " + item.title + " - this item needs a metadata refresh (open plex webui, find item, open item menu, refresh metadata).")  
         ui_print('done')
+        # Best-effort ID correction of positively linked movie downloads. This
+        # never filters acquisition or changes uncertain/no-ID library items.
+        from content import identity
+        identity.reconcile(list_)
         # Cleanup needs the full CURRENT reference graph to reject shared files.
         current_library = copy.deepcopy(list_)
         if classes.media.upgrade_remove_superseded == "true":

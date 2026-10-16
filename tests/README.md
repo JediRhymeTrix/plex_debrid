@@ -35,3 +35,21 @@ Plex may retain the unavailable old entry until its next normal scan.
 `content.cleanup.clean(item, dry_run=True)` performs observational checks only,
 without media-byte reads or deletion. Do not use `plex.library()` to implement a
 preview when cleanup is enabled: the library refresh hook runs cleanup.
+
+## Movie identity correction
+
+Successful movie grabs may queue a post-scan IMDb check in the gitignored
+`plex_download_identity.json` under the configured settings directory. Records
+contain only the original requested IMDb ID, selected torrent-relative video
+path, byte size, and retry timestamps. They survive restart and expire after
+30 days. No credentials or direct download links are stored.
+
+Correction requires one uniquely linked Plex movie/file, an exact IMDb search,
+and independent verification that the returned Plex candidate carries the same
+IMDb ID. Multi-video downloads and merged/multipart items are not guessed.
+Metadata-only rematching never deletes or renames files.
+
+This is advisory and fail-open: no ID, no verified match, an ambiguous link, or
+an API/persistence error leaves acquisition behavior unchanged. Existing title,
+quality and cleanup rules are not relaxed. No match-dependent download rejection
+is introduced.

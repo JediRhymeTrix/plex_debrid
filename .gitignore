@@ -397,5 +397,7 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 settings.json
+plex_download_identity.json
+plex_download_identity.json.tmp
 trakt_client.json
 .env

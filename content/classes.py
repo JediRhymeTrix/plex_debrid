@@ -321,6 +321,9 @@ class media:
             return False
 
     def match(self, service):
+        if self.type == 'movie':
+            from content import identity
+            identity.capture(self)
         if not hasattr(self, "services"):
             self.services = [self.__module__]
         if self.type == "show":
@@ -1146,6 +1149,9 @@ class media:
 
     def download(self, retries=0, library=[], parentReleases=[]):
         global imdb_scraped
+        if self.type == 'movie':
+            from content import identity
+            identity.capture(self)
         refresh_ = False
         i = 0
         self.Releases = []
@@ -1468,6 +1474,14 @@ class media:
                 release.grabbed_at = time.time()
                 records[:] = [r for r in records if r.title != release.title]
                 records.append(release)
+                # Advisory metadata repair only. Missing identity or unavailable
+                # Plex must never turn a successful download into a rejection.
+                if self.type == 'movie':
+                    try:
+                        from content import identity
+                        identity.remember(self, release)
+                    except Exception:
+                        ui_print('[plex identity] could not queue check; download remains allowed')
         elif self.type == 'show':
             filemode = False
             for season in self.Seasons:
