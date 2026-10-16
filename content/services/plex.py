@@ -891,6 +891,8 @@ class library(classes.library):
                 ui_print('done')
                 ui_print("[plex error]: found incorrectly matched library item : " + item.title + " - this item needs a metadata refresh (open plex webui, find item, open item menu, refresh metadata).")  
         ui_print('done')
+        # Cleanup needs the full CURRENT reference graph to reject shared files.
+        current_library = copy.deepcopy(list_)
         if classes.media.upgrade_remove_superseded == "true":
             for item in list_:
                 item.remove_superseded()

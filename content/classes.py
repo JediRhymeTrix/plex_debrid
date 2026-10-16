@@ -268,6 +268,9 @@ class media:
 
     ignore_queue = []
     downloaded_versions = []
+    # Successful grabs bridge the time until Plex scans their files. Plex remains
+    # the source of truth after restart; this map is never a deletion authority.
+    session_releases = {}
     # Library-upgrade pacing: defaults keep the historic every-cycle cadence.
     # All pacing state is in-memory only - the system stays restart-safe and
     # stateless (a restart simply re-evaluates; no correctness risk).
@@ -278,6 +281,9 @@ class media:
     upgrade_interval_movies = "0"
     upgrade_max_age = "0"
     upgrade_remove_superseded = "false"
+    # Explicit mapping of the Plex host's TorBox mount. Unknown/RD mounts are
+    # never deleted through filesystem or Plex media DELETE endpoints.
+    upgrade_cleanup_torbox_root = ""
 
     def __init__(self, other):
         self.__dict__.update(other.__dict__)
@@ -429,10 +435,10 @@ class media:
             title = title.replace('.' + str(self.year), '')
             return title
         elif self.type == 'season':
-            title = title.replace('.' + str(self.parentYear), '')
+            title = title.replace('.' + str(getattr(self, 'parentYear', 'unknown')), '')
             return title + '.S' + str("{:02d}".format(self.index)) + '.'
         elif self.type == 'episode':
-            title = title.replace('.' + str(self.grandparentYear), '')
+            title = title.replace('.' + str(getattr(self, 'grandparentYear', 'unknown')), '')
             if hasattr(self, "scraping_adjustment"):
                 for operator, value in self.scraping_adjustment:
                     if operator == "scrape w/ airdate format":
@@ -689,167 +695,45 @@ class media:
         return genres
 
     def versions(self, quick=False):
-        # initialize downloaded and existing releases
-        if not hasattr(self, "existing_releases"):
-            self.existing_releases = []
-        if not hasattr(self, "downloaded_releases"):
-            self.downloaded_releases = []
-        if self.type == "show":
-            for season in self.Seasons:
-                if not hasattr(season, "existing_releases"):
-                    season.existing_releases = []
-                if not hasattr(season, "downloaded_releases"):
-                    season.downloaded_releases = []
-                for episode in season.Episodes:
-                    if not hasattr(episode, "existing_releases"):
-                        episode.existing_releases = []
-                    if not hasattr(episode, "downloaded_releases"):
-                        episode.downloaded_releases = []
-        if self.type == "season":
-            for episode in self.Episodes:
-                if not hasattr(episode, "existing_releases"):
-                    episode.existing_releases = []
-                if not hasattr(episode, "downloaded_releases"):
-                    episode.downloaded_releases = []
-        # get all versions
-        versions = []
-        for version in releases.sort.versions:
-            if not '\u0336' in version[0]:
-                versions += [releases.sort.version(
-                    version[0], version[1], version[2], version[3])]
-        # update media items ignore count
+        from content import quality
         if self in media.ignore_queue:
             match = next((x for x in media.ignore_queue if self == x), None)
             self.ignored_count = match.ignored_count
-        # remove versions that dont apply
-        for version in versions[:]:
-            if not version.applies(self):
-                versions.remove(version)
-        # remove versions that have been downloaded in this session:
-        all_versions = copy.deepcopy(versions)
-        for version in versions[:]:
-            missing = False
-            if self.type == "movie" or self.type == "episode":
-                if self.query() + ' [' + version.name + ']' in media.downloaded_versions:
-                    versions.remove(version)
-            elif self.type == 'show':
-                for season in self.Seasons:
-                    for episode in season.Episodes:
-                        if not episode.query() + ' [' + version.name + ']' in media.downloaded_versions:
-                            missing = True
-                            break
-                    if missing == True:
-                        break
-                if not missing:
-                    versions.remove(version)
-            elif self.type == 'season':
-                for episode in self.Episodes:
-                    if not episode.query() + ' [' + version.name + ']' in media.downloaded_versions:
-                        missing = True
-                        break
-                if not missing:
-                    versions.remove(version)
-        if quick:
-            return versions
-        # If Trakt is the  collection service, the upgrading of collected content is not possible, since no record of the downloaded file names is kept. return the missing versions from this session.
-        if library()[0].name != 'Plex Library':
-            return versions
-        # If Plex is the collection service: when at least one version still
-        # needs a normal download, no upgrades should be made. But when EVERY
-        # version was already downloaded this session, the content is fully
-        # collected for now and unmet upgrade rules must keep hunting.
-        if versions != all_versions and not all(
-                self.query() + ' [' + v.name + ']' in media.downloaded_versions for v in all_versions):
-            return versions
-        # Check if there are any missing versions with upgrade rules for this media item, if not, return all versions.
-        # Evaluate against all_versions: versions downloaded earlier this session
-        # still carry unmet upgrade rules and must keep hunting.
-        upgrade_versions = []
-        for version in all_versions:
-            for rule in version.rules:
-                if rule[1] == "upgrade":
-                    if not self.query() + ' [' + version.name + " upgrade]" in media.downloaded_versions:
-                        upgrade_versions += [version]
-                        break
-        if len(upgrade_versions) == 0:
-            return versions
-        # Check if the content is completely collected:
+        if not hasattr(self, 'existing_releases'):
+            self.existing_releases = []
+        if not hasattr(self, 'downloaded_releases'):
+            self.downloaded_releases = []
+        if self.type in ('show', 'season'):
+            episodes = (self.Episodes if self.type == 'season' else
+                        [e for s in self.Seasons for e in s.Episodes])
+            result = []
+            for episode in episodes:
+                if not episode.released() or episode.watched():
+                    continue
+                for version in episode.versions(quick=quick):
+                    if version not in result:
+                        result.append(version)
+            # Target-compliant packs can cover initial acquisition as well.
+            # Try them before fallback variants, independent of episode order.
+            result.sort(key=lambda v: not v.name.endswith(' upgrade'))
+            return result
+        if quick or library()[0].name != 'Plex Library':
+            return [v for v in quality.active_versions(self)
+                    if self.query() + ' [' + v.name + ']' not in media.downloaded_versions]
         from content.services.plex import current_library
-        if not self.complete(current_library):
-            return versions
-        # If the collection service is Plex, all versions are missing, there are upgradable versions and content is completely collected, look for upgrades:
-        versions = []
-        for version in upgrade_versions:
-            added = False
-            self.set_file_names()
-            if self.type == "movie" or self.type == "episode":
-                if not self.query() + ' [' + version.name + " upgrade]" in media.downloaded_versions:
-                    for rule in version.rules:
-                        if not rule[1] == "upgrade":
-                            continue
-                        if releases.sort.version.rule(rule[0], rule[1], rule[2], rule[3]).upgrade(self.existing_releases):
-                            upgrade_rules = copy.deepcopy(version.rules)
-                            for i, rule_ in enumerate(version.rules):
-                                if rule_[1] == "upgrade":
-                                    upgrade_rules[i][1] = "requirement"
-                            versions += [releases.sort.version(
-                                version.name + " upgrade", version.triggers, version.lang, upgrade_rules)]
-                            break
-            elif self.type == 'show':
-                for season in self.Seasons:
-                    for episode in season.Episodes:
-                        if not episode.query() + ' [' + version.name + " upgrade]" in media.downloaded_versions:
-                            for rule in version.rules:
-                                if not rule[1] == "upgrade":
-                                    continue
-                                if releases.sort.version.rule(rule[0], rule[1], rule[2], rule[3]).upgrade(episode.existing_releases):
-                                    upgrade_rules = copy.deepcopy(
-                                        version.rules)
-                                    for i, rule_ in enumerate(version.rules):
-                                        if rule_[1] == "upgrade":
-                                            upgrade_rules[i][1] = "requirement"
-                                    versions += [releases.sort.version(
-                                        version.name + " upgrade", version.triggers, version.lang, upgrade_rules)]
-                                    added = True
-                                    break
-                            if added:
-                                break
-                    if added:
-                        break
-            elif self.type == "season":
-                for episode in self.Episodes:
-                    if not episode.query() + ' [' + version.name + " upgrade]" in media.downloaded_versions:
-                        for rule in version.rules:
-                            if not rule[1] == "upgrade":
-                                continue
-                            if releases.sort.version.rule(rule[0], rule[1], rule[2], rule[3]).upgrade(episode.existing_releases):
-                                upgrade_rules = copy.deepcopy(version.rules)
-                                for i, rule_ in enumerate(version.rules):
-                                    if rule_[1] == "upgrade":
-                                        upgrade_rules[i][1] = "requirement"
-                                versions += [releases.sort.version(
-                                    version.name + " upgrade", version.triggers, version.lang, upgrade_rules)]
-                                added = True
-                                break
-                        if added:
-                            break
-        if len(versions) > 0:
-            versions
-        return versions
+        return quality.missing_versions(self, current_library, media.downloaded_versions,
+                                        media.session_releases)
 
     def version_missing(self):
-        all_versions = []
-        if self in media.ignore_queue:
-            match = next((x for x in media.ignore_queue if self == x), None)
-            self.ignored_count = match.ignored_count
-        for version in releases.sort.versions:
-            if not '\u0336' in version[0]:
-                all_versions += [releases.sort.version(
-                    version[0], version[1], version[2], version[3])]
-        for version in all_versions[:]:
-            if not version.applies(self):
-                all_versions.remove(version)
-        return len(self.versions()) > 0 and not self.versions() == all_versions
+        if library()[0].name != 'Plex Library':
+            # Other collection services do not retain filenames/quality facts.
+            # Retain session-partial retry behavior without reacquiring every
+            # collected item after a restart.
+            from content import quality
+            pending = self.versions()
+            all_versions = quality.active_versions(self)
+            return bool(pending) and pending != all_versions
+        return bool(self.versions())
 
     def get_added_at(self):
         # Returns the unix timestamp (seconds) when this item was added to the
@@ -913,13 +797,6 @@ class media:
         return True
 
     def remove_superseded(self):
-        # Optional cleanup for the library upgrade feature (default "false"):
-        # when Plex reports MULTIPLE file versions for an item and the version
-        # rules clearly rank one above the others, delete the lower-ranked
-        # file(s). Derived purely from live Plex state on every call - no
-        # pending-deletion state is kept, so a crash mid-deletion heals on the
-        # next pass. WARNING: this deletes ANY strictly-dominated duplicate,
-        # including manually kept lower-quality compatibility copies.
         if media.upgrade_remove_superseded != "true":
             return
         if self.type == "show":
@@ -932,52 +809,10 @@ class media:
             return
         if self.type not in ["movie", "episode"]:
             return
-        if self.downloading():
+        if len(getattr(self, 'Media', [])) < 2:
             return
-        if not hasattr(self, "Media"):
-            return
-        import os
-        import re
-        candidates = []
-        for Media in self.Media:
-            res = 0
-            try:
-                res = 2160 if Media.videoResolution == "4k" else int(Media.videoResolution or 0)
-            except:
-                res = 0
-            for Part in Media.Part:
-                file_path = Part.file
-                file_name = file_path.replace("\\", "/").split("/")[-1].lower()
-                is_imax = bool(re.search(r'(IMAX)', file_name, re.I))
-                is_matte = bool(re.search(r'(OPEN[ .-]?MATTE|MATTE)', file_name, re.I))
-                score = res * 1000000
-                if re.search(r'(DOVI|DOLBY[ .]?VISION|\bDV\b)', file_name, re.I):
-                    score += 4000
-                if re.search(r'(HDR)', file_name, re.I):
-                    score += 2000
-                if re.search(r'(REMUX|BLURAY|BLU[ .-]?RAY|BDREMUX|FULL[ .]?BD|UHD[ .]?BLU)', file_name, re.I):
-                    score += 1000
-                if re.search(r'(ATMOS|TrueHD|DTS[ .-]?X)', file_name, re.I):
-                    score += 500
-                if re.search(r'(3D)', file_name, re.I):
-                    score += 100
-                candidates += [(score, file_path, is_imax, is_3d, is_matte)]
-        if len(candidates) < 2:
-            return
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        keeper_score = candidates[0][0]
-        keeper_is_imax = candidates[0][2]
-        keeper_is_3d = candidates[0][3]
-        keeper_is_matte = candidates[0][4]
-        for score, file_path, is_imax, is_3d, is_matte in candidates[1:]:
-            if is_imax or is_3d or is_matte or keeper_is_imax or keeper_is_3d or keeper_is_matte:
-                continue
-            if score < keeper_score:
-                try:
-                    os.remove(file_path)
-                    ui_print("[plex] item: \"" + self.title + "\" - removed superseded lower-quality file: " + file_path)
-                except Exception as e:
-                    ui_print("[plex] error: couldnt remove superseded file \"" + file_path + "\": " + str(e), ui_settings.debug)
+        from content.cleanup import clean
+        clean(self)
 
     def set_file_names(self):
         if not library()[0].name == 'Plex Library' or hasattr(self, "upgradable"):
@@ -1060,6 +895,13 @@ class media:
     def watch(self):
         global imdb_scraped
         imdb_scraped = False
+        # Failure to find an optional presentation or quality upgrade must not
+        # mark an already-acquired item watched/ignored after initial retries.
+        from content import quality
+        from content.services.plex import current_library
+        if library()[0].name == 'Plex Library' and quality.existing(
+                self, current_library, media.session_releases):
+            return
         names = []
         retries = 0
         for version in self.versions():
@@ -1291,10 +1133,8 @@ class media:
         return []
 
     def downloading(self):
-        if hasattr(self, "version"):
-            return [self.query() + ' [' + self.version.name + ']'] in debrid.downloading
-        else:
-            return False
+        prefix = self.query() + ' ['
+        return any(isinstance(key, str) and key.startswith(prefix) for key in debrid.downloading)
 
     def hasended(self):
         if hasattr(self, "status"):
@@ -1622,6 +1462,12 @@ class media:
         if self.type == "movie" or self.type == "episode":
             media.downloaded_versions += [self.query() +
                                           ' [' + self.version.name + ']']
+            if getattr(self, 'Releases', []):
+                records = media.session_releases.setdefault(self.query(), [])
+                release = copy.deepcopy(self.Releases[0])
+                release.grabbed_at = time.time()
+                records[:] = [r for r in records if r.title != release.title]
+                records.append(release)
         elif self.type == 'show':
             filemode = False
             for season in self.Seasons:
@@ -1630,13 +1476,21 @@ class media:
                         if hasattr(file, 'match'):
                             if file.match == episode.files()[0]:
                                 episode.version = self.version
+                                episode.Releases = copy.deepcopy(self.Releases)
+                                episode.Releases[0].title += '.' + getattr(file, 'name', '')
+                                episode.Releases[0].files = [copy.deepcopy(file)]
+                                if hasattr(file, 'size'):
+                                    episode.Releases[0].size = file.size
+                                resolution = regex.findall(r'(2160|1080|720|480)p', getattr(file, 'name', ''), regex.I)
+                                if resolution:
+                                    episode.Releases[0].resolution = resolution[-1]
                                 episode.downloaded()
                                 filemode = True
                                 break
             if not filemode:
-                for season in self.Seasons:
-                    season.version = self.version
-                    season.downloaded()
+                # Without provider file matches we cannot prove episode
+                # coverage. Never mark an entire series acquired by title alone.
+                ui_print('[download] no episode file matches; leaving coverage unconfirmed', ui_settings.debug)
         elif self.type == 'season':
             filemode = False
             for episode in self.Episodes:
@@ -1645,13 +1499,19 @@ class media:
                     if hasattr(file, 'match'):
                         if file.match == episode.files()[0]:
                             episode.version = self.version
+                            episode.Releases = copy.deepcopy(self.Releases)
+                            episode.Releases[0].title += '.' + getattr(file, 'name', '')
+                            episode.Releases[0].files = [copy.deepcopy(file)]
+                            if hasattr(file, 'size'):
+                                episode.Releases[0].size = file.size
+                            resolution = regex.findall(r'(2160|1080|720|480)p', getattr(file, 'name', ''), regex.I)
+                            if resolution:
+                                episode.Releases[0].resolution = resolution[-1]
                             episode.downloaded()
                             filemode = True
                             break
             if not filemode:
-                for episode in self.Episodes:
-                    episode.version = self.version
-                    episode.downloaded()
+                ui_print('[download] no episode file matches; leaving coverage unconfirmed', ui_settings.debug)
 
     def debrid_download(self, force=False):
         debrid.check(self)
@@ -1666,6 +1526,10 @@ class media:
                     "error: it seems that no version applies to this media item! nothing will be downloaded. adjust your version settings.", ui_settings.debug)
             imax_downloaded = False
             for version in self.versions():
+                # A preceding grab can satisfy several versions. Re-evaluate
+                # coverage before sending another request to a debrid provider.
+                if version not in self.versions():
+                    continue
                 debrid_uncached = True
                 # Expanded-ratio exclusivity: IMAX is preferred over Open Matte.
                 # When an IMAX cut was already grabbed in this pass, skip the
@@ -1704,7 +1568,7 @@ class media:
                             break
                 if not ver_dld:
                     downloaded += [False]
-        return True in downloaded, (False in downloaded or len(downloaded) == 0)
+        return True in downloaded, bool(self.versions())
 
     def files(self):
         files = []

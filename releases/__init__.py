@@ -764,7 +764,7 @@ class sort:
 
             def __init__(self, attribute, required, operator, value=None) -> None:
                 self.attribute = "cached"
-                self.weight = (required == "requirement")
+                self.weight = required
                 self.operator = operator
                 self.value = value
 
