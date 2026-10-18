@@ -1,8 +1,9 @@
 # Lightweight Trakt subscriptions
 
 Use **Plex Download Queue** as one authoritative private list of movies and
-shows to acquire or improve. Entries stay until you remove them; the service
-does not empty this list after a pass. A second list is not required. Trakt
+shows to acquire or improve. Entries are not consumed after a pass; they stay
+until manually removed or eligible under the configured retirement policy.
+A second list is not required. Trakt
 stores intent, Plex stores observed files, and the existing downloader handles
 releases. There is no local monitoring database, scheduler journal, dependency
 or extra service/thread. A separate consumable inbox is optional and disabled
@@ -24,6 +25,8 @@ the main queue, not another required list.
 | `Monitoring poll minutes` | `10` | Trakt membership and Plex library refresh interval; minimum 1 |
 | `Monitoring attempt budget` | `10` | Maximum monitored movie/episode attempts per pass; 1–100 |
 | `Monitoring schedule hours` | `1,24,168,720` | Recent episode, recent movie, mature, catalogue/optional cadence |
+| `Monitoring retirement policy` | `target-met` | `off`, `target-met`, or `playable-after-grace` |
+| `Monitoring retirement grace days` | `90` | Positive grace from the latest required factual date |
 
 Recent episodes are <=7 days old; recent movies <=90 days; mature releases are
 <=365 days. Unknown/older release dates use catalogue cadence. Missing baseline
@@ -32,7 +35,8 @@ the faster episode cadence. Observed additions/re-adds to the main queue bypass 
 cadence, but never release gating, watched exclusions or hard version rules.
 Recent Plex additions get a fresh upgrade window. After the main target is met,
 strictly better preference-ranked copies and optional presentations are checked
-at catalogue cadence. Nothing expires solely because it is old.
+at catalogue cadence. Nothing expires solely because it is old or searches
+return no results; retirement additionally requires verified playable coverage.
 
 One pass runs approximately each minute, cooperatively in the existing service.
 The budget counts movie/episode attempts, **not HTTP calls**: a normal attempt
@@ -46,7 +50,7 @@ intervals; they are outside the new monitored-work budget.
 - Add an old, new or upcoming title directly to **Plex Download Queue**.
 - Acquired titles remain subscribed to slow, budgeted upgrade checks.
 - Optional presentations do not make every title eligible on every pass.
-- Removing a title stops its background monitoring without deleting media.
+- Removing or retiring a title stops its background monitoring without deleting media.
 - An observed remove/re-add, or a changed Trakt entry timestamp, wakes a title
   again without duplicating an existing copy. Re-adds invalidate its cached
   metadata. A change entirely between polls can be invisible if Trakt does not
@@ -56,6 +60,48 @@ intervals; they are outside the new monitored-work budget.
 
 The list records **monitoring intent**, not a count of currently actionable
 downloads. Scheduling and file coverage determine what work is actually due.
+
+## Configurable queue retirement
+
+The recommended default is **`target-met` with 90 days**. Set `off` to preserve
+all subscriptions until manual removal. `playable-after-grace` instead permits
+a verified playable fallback meeting the main version's hard requirements even
+when its upgrade target is unmet; consider setting grace to **180 days** when
+using that more aggressive mode. Both modes use the same configurable grace.
+
+Retirement requires the grace to have elapsed since the latest required date:
+queue addition/re-addition, Plex acquisition, and home-release availability
+(movies) or final normal episode airdate (shows). A first applicable known
+digital/physical/TV release establishes movie home availability; theatrical-only
+metadata does not. Missing/invalid dates, unavailable APIs, identity conflicts,
+multipart/unknown files, or unreadable replacements retain the subscription.
+
+- Movies must be released and have a freshly verified usable library file.
+- Returning, upcoming, in-production and hiatus shows never retire.
+- Ended/cancelled shows need complete normal-season episode metadata, no known
+  future/unaired episodes, and every expected episode available at the selected
+  policy's quality. Specials remain excluded, matching the existing show scope.
+- `target-met` requires all main upgrade predicates on one file per movie or
+  episode. Optional IMAX/3D/Open Matte versions do not block retirement; an
+  explicit hard requirement in the primary version does.
+- Watched status and unsuccessful searches are not retirement evidence.
+
+At most **one aged candidate per successful membership poll** is checked, using
+round-robin selection. Young entries cause no extra retirement API requests.
+Eligibility uses fresh Trakt metadata, Plex `checkFiles` and a bounded one-byte
+read. File verification stops starting new reads after a 30-second candidate
+deadline (an in-flight request still uses its normal timeout). Large/slow shows
+that cannot be completely verified within a pass are conservatively retained;
+there is no persisted verification cursor. Before removal the exact main-list entry timestamp is checked again;
+the service verifies absence afterward. It never deletes media, an entire list,
+or entries from unrelated lists. Trakt has no cross-request atomic removal;
+changes racing between the last read and removal cannot be eliminated entirely.
+
+**Retirement stops future upgrades through this queue.** It does not establish
+that no later REMUX, remaster or alternate presentation will appear. Re-add a
+retired title to request monitoring again. The grace is not "time since last
+improvement": Plex's item-added timestamp may predate its latest replacement.
+No history database or archive list is introduced.
 
 ## Optional inbox (disabled by default)
 
@@ -82,7 +128,7 @@ in-memory snapshot. Trakt remains authoritative after restart.
 
 ## Resource boundaries and compatibility
 
-- Five settings, one monitor module, no new dependencies.
+- Seven policy/scheduling settings, no new dependencies or persistent job state.
 - Full list snapshots are lightweight raw rows. Show metadata is hydrated only
   when eligible, bounded per pass, refreshed hourly (ended shows daily), and
   cached under a 5,000-episode/leaf cap.

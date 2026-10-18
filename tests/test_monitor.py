@@ -28,7 +28,7 @@ def row(number=1, kind='movie', listed='2026-10-18T00:00:00.000Z', released='198
 class MonitorTests(unittest.TestCase):
     def setUp(self):
         settings = dict(list=MONITORED, inbox=INBOX, poll_minutes='10', budget='10',
-                        schedule='1,24,168,720')
+                        schedule='1,24,168,720', retirement_policy='off', retirement_grace_days='90')
         self.enterContext(patch.multiple(monitor, **settings))
         self.enterContext(patch.multiple(trakt, users=[USER], lists=[INBOX]))
 

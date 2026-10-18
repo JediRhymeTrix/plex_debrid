@@ -21,6 +21,8 @@ poll_minutes = '10'
 budget = '10'
 # Hours: recent episodes, recent movies, mature releases, catalogue/alternates.
 schedule = '1,24,168,720'
+retirement_policy = 'target-met'
+retirement_grace_days = '90'
 CACHE_LEAVES = 5000
 COOLDOWNS = 20000
 
@@ -38,6 +40,10 @@ def configuration():
     if (len(hours) != 4 or any(not math.isfinite(h) or h <= 0 for h in hours)
             or not math.isfinite(poll) or poll < 1 or attempts < 1 or attempts > 100):
         raise ValueError('use four positive schedule hours, poll >= 1 minute, budget 1..100')
+    from content.retirement import POLICIES
+    grace = float(retirement_grace_days)
+    if retirement_policy not in POLICIES or not math.isfinite(grace) or grace <= 0:
+        raise ValueError('retirement policy must be off, target-met or playable-after-grace; grace days must be positive')
     return owner, sources, poll * 60, attempts, hours
 
 
@@ -147,6 +153,8 @@ class Worker:
         self.next_sources = 0
         self.next_metadata = OrderedDict()
         self.next_legacy = 0
+        self.main_list_id = None
+        self.retirement_cursor = 0
 
     def keep(self, identity, item, now):
         leaves = (max(1, sum(len(s.Episodes) for s in item.Seasons)) if item.type == 'show' else 1)
@@ -230,8 +238,8 @@ class Worker:
             present.update(record for record in observed
                            if record in self.seen_inbox or record[1] in wake)
         self.seen_inbox = present
-        # The main list is authoritative and is never consumed. Compare entry
-        # timestamps as well as membership so an observed re-add wakes old media.
+        # Main membership is authoritative, not an intake acknowledgement.
+        # Explicit retirement is separate; observed re-adds wake old media.
         previous = {key(r): getattr(r, 'listed_at', '') for r in self.rows}
         self.rows = [r for r in monitored if key(r)]
         members = {key(r) for r in self.rows}
@@ -253,6 +261,8 @@ class Worker:
             if identity not in members:
                 self.next_metadata.pop(identity)
         self.snapshot_loaded = True
+        self.main_list_id = (destination if any(x.ids.trakt == destination and getattr(x, 'privacy', None) == 'private'
+                                               for x in lists) else None)
         return True
 
     def hydrate(self, row, now):
@@ -377,8 +387,9 @@ class Worker:
         from content.classes import library
         now = time.time() if now is None else now
         self.remaining = self.limit
+        refreshed = False
         if now >= self.next_sources:
-            self.snapshot(now)
+            refreshed = self.snapshot(now)
             self.next_sources = now + self.poll
         if not self.rows:
             if now < self.next_legacy:
@@ -393,6 +404,9 @@ class Worker:
             self.next_library = now + self.poll
         if not self.library:
             return
+        if refreshed:
+            from content import retirement
+            retirement.run(self, now)
         # Wake requests first, then oldest attempts. Stable IDs break ties.
         rows = sorted(self.rows, key=lambda r: (key(r) not in self.wake,
                                                self.checked.get(key(r), 0), key(r)))
@@ -453,6 +467,7 @@ def run(stop):
         ui_print('[monitor] invalid configuration: ' + str(exc) + '; no inbox entries changed')
         return
     ui_print('[monitor] stateless Trakt subscriptions enabled; no local monitoring database')
+    ui_print('[monitor] retirement policy=' + retirement_policy + ' grace_days=' + retirement_grace_days)
     while not stop():
         try:
             worker.cycle()

@@ -16,6 +16,17 @@ suppression, pending-grab reconciliation/expiry, per-episode pack coverage,
 retry limits, actual rule ordering/ties, missing keepers, playback, failed
 requests, shared files, and isolated TorBox backend identification.
 
+## Queue retirement
+
+`test_retirement.py` covers `off`, recommended-default `target-met` (90-day
+grace), and the optional `playable-after-grace` fallback. Cases include re-add
+timestamps, release/acquisition/finale dates, uncertain identities and APIs,
+ongoing/hiatus and incomplete ended shows, unreadable files, single-file target
+coverage, exact-list ownership, and single-attempt removal without dangerous
+POST retries. All list and media operations are mocked; tests never remove
+real entries or files. `Monitoring retirement policy = off` disables retirement
+without changing acquisition, quality upgrades or superseded cleanup.
+
 ## Cleanup boundaries
 
 Cleanup is opt-in; both `Library upgrade remove superseded files = true` and
