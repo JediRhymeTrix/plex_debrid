@@ -45,11 +45,64 @@ class MonitorTests(unittest.TestCase):
             ui.threaded(lambda: True)
             run.assert_called_once()
 
-    def test_configuration_requires_owned_distinct_private_lists(self):
+    def test_configuration_requires_owned_main_and_distinct_optional_inboxes(self):
         self.assertEqual(monitor.configuration()[0], USER)
         for bad in (INBOX, "someone's private list: Monitored", '/users/test/lists/public'):
             with self.subTest(bad=bad), patch.object(monitor, 'list', bad):
                 with self.assertRaises(ValueError): monitor.configuration()
+
+    def test_main_queue_can_also_be_configured_as_a_legacy_trakt_source(self):
+        with patch.object(monitor, 'list', INBOX), patch.object(monitor, 'inbox', ''):
+            owner, sources, *_ = monitor.configuration()
+            self.assertEqual(owner, USER)
+            self.assertEqual(sources, [])
+
+    def test_single_queue_snapshot_never_enrolls_removes_or_calls_inbox_endpoints(self):
+        with patch.object(monitor, 'list', INBOX), patch.object(monitor, 'inbox', ''):
+            worker = monitor.Worker()
+            owned = [NS(name='Queue', privacy='private', ids=NS(trakt=11))]
+            with patch.object(monitor, 'pages', side_effect=[owned, [row()]]) as reads, \
+                    patch.object(monitor, 'write') as writes, patch.object(monitor, 'enroll') as enroll:
+                self.assertTrue(worker.snapshot(NOW))
+                self.assertEqual(reads.call_count, 2)
+                writes.assert_not_called();enroll.assert_not_called()
+            self.assertEqual(len(worker.rows), 1)
+            self.assertIn(('movie', 1), worker.wake_since)
+
+    def test_main_queue_readd_with_new_timestamp_wakes_and_invalidates_cached_metadata(self):
+        with patch.object(monitor, 'list', INBOX), patch.object(monitor, 'inbox', ''):
+            worker = monitor.Worker()
+            worker.rows = [row(listed='2025-01-01T00:00:00Z')]
+            worker.keep(('movie', 1), NS(type='movie'), NOW)
+            worker.next_metadata[('movie', 1)] = NOW + 100000
+            owned = [NS(name='Queue', privacy='private', ids=NS(trakt=11))]
+            with patch.object(monitor, 'pages', side_effect=[owned, [row()]]), patch.object(monitor, 'write') as writes:
+                self.assertTrue(worker.snapshot(NOW));writes.assert_not_called()
+            self.assertEqual(worker.wake_since[('movie', 1)], NOW)
+            self.assertNotIn(('movie', 1), worker.cache)
+            self.assertNotIn(('movie', 1), worker.next_metadata)
+
+    def test_old_timestamp_added_after_empty_queue_refresh_still_wakes(self):
+        with patch.object(monitor, 'list', INBOX), patch.object(monitor, 'inbox', ''):
+            worker = monitor.Worker()
+            owned = [NS(name='Queue', privacy='private', ids=NS(trakt=11))]
+            with patch.object(monitor, 'pages', side_effect=[owned, [], owned, [row(listed='2020-01-01T00:00:00Z')]]):
+                self.assertTrue(worker.snapshot(NOW))
+                self.assertTrue(worker.snapshot(NOW + 600))
+            self.assertIn(('movie', 1), worker.wake_since)
+
+    def test_single_queue_members_are_not_passed_to_legacy_autoremove(self):
+        from content.services import plex, overseerr
+        with patch.object(monitor, 'list', INBOX), patch.object(monitor, 'inbox', ''):
+            worker = monitor.Worker();worker.library = [NS(type='movie')]
+            original = [INBOX, "test's watchlist"]
+            observed = []
+            entry = NS(download=lambda **kw: observed.extend(trakt.lists))
+            with patch.object(trakt, 'lists', original), patch.object(plex, 'watchlist', return_value=[]), \
+                    patch.object(trakt, 'watchlist', return_value=[entry]), patch.object(overseerr, 'requests', return_value=[]):
+                worker.legacy_cycle(NOW)
+                self.assertEqual(trakt.lists, original)
+            self.assertEqual(observed, ["test's watchlist"])
 
     def test_invalid_schedule_and_budget_rejected(self):
         for name, value in (('schedule', '1,0,2,3'), ('schedule', 'garbage'), ('budget', '0'), ('poll_minutes', 'nan')):

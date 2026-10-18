@@ -1,4 +1,4 @@
-"""Opt-in Trakt subscriptions. External membership is durable; RAM is disposable.
+"""One authoritative Trakt subscription list; an optional inbox is disabled by default.
 
 No database, task journal, extra worker threads or third-party dependencies.
 The original automation loop is unchanged when `list` is empty.
@@ -29,10 +29,10 @@ def configuration():
     prefix = "'s private list: "
     owner = next((u for u in trakt.users if list.startswith(u[0] + prefix)), None)
     sources = [s.strip() for s in inbox.split(';') if s.strip()]
-    if (owner is None or not list[len(owner[0] + prefix):].strip() or list in trakt.lists
+    if (owner is None or not list[len(owner[0] + prefix):].strip()
             or any(not s.startswith(owner[0] + prefix) or s == list or s not in trakt.lists
                    for s in sources)):
-        raise ValueError('monitoring and inboxes must be distinct owned private lists; inboxes must be in Trakt lists')
+        raise ValueError('main list must be owned/private; optional inboxes must be distinct owned private Trakt lists')
     hours = tuple(float(s) for s in schedule.split(','))
     poll, attempts = float(poll_minutes), int(budget)
     if (len(hours) != 4 or any(not math.isfinite(h) or h <= 0 for h in hours)
@@ -138,6 +138,7 @@ class Worker:
         self.checked = OrderedDict()
         self.cache = OrderedDict()
         self.rows = []
+        self.snapshot_loaded = False
         self.wake = set()
         self.wake_since = {}
         self.seen_inbox = set()
@@ -229,15 +230,20 @@ class Worker:
             present.update(record for record in observed
                            if record in self.seen_inbox or record[1] in wake)
         self.seen_inbox = present
-        # A source failure never reaches this point; a successful removal does.
-        previous = {key(r) for r in self.rows}
+        # The main list is authoritative and is never consumed. Compare entry
+        # timestamps as well as membership so an observed re-add wakes old media.
+        previous = {key(r): getattr(r, 'listed_at', '') for r in self.rows}
         self.rows = [r for r in monitored if key(r)]
         members = {key(r) for r in self.rows}
         for row in self.rows:
-            if key(row) not in previous and now - timestamp(getattr(row, 'listed_at', None)) < 86400:
-                self.wake.add(key(row))
-                self.wake_since.setdefault(key(row), now)
-                self.next_metadata.pop(key(row), None)
+            identity = key(row)
+            changed = identity in previous and previous[identity] != getattr(row, 'listed_at', '')
+            added = identity not in previous and (self.snapshot_loaded or now - timestamp(getattr(row, 'listed_at', None)) < 86400)
+            if changed or added:
+                self.wake.add(identity)
+                self.wake_since[identity] = now
+                self.next_metadata.pop(identity, None)
+                self.cache.pop(identity, None)
         self.wake.intersection_update(members)
         self.wake_since = {k: v for k, v in self.wake_since.items() if k in members}
         for identity in tuple(self.cache):
@@ -246,6 +252,7 @@ class Worker:
         for identity in tuple(self.next_metadata):
             if identity not in members:
                 self.next_metadata.pop(identity)
+        self.snapshot_loaded = True
         return True
 
     def hydrate(self, row, now):

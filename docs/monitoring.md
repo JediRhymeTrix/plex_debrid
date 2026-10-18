@@ -1,20 +1,26 @@
 # Lightweight Trakt subscriptions
 
-The opt-in monitor separates an **inbox** (search requests) from a private
-**monitoring list** (durable subscriptions). Trakt stores intent, Plex stores
-observed files, and the existing downloader handles releases. There is no local
-monitoring database, scheduler journal, dependency or extra service/thread.
+Use **Plex Download Queue** as one authoritative private list of movies and
+shows to acquire or improve. Entries stay until you remove them; the service
+does not empty this list after a pass. A second list is not required. Trakt
+stores intent, Plex stores observed files, and the existing downloader handles
+releases. There is no local monitoring database, scheduler journal, dependency
+or extra service/thread. A separate consumable inbox is optional and disabled
+by default.
 
 ## Configuration
 
-Create a private Trakt list, for example **Plex Monitored**, under an already
-configured Trakt user. Keep it **out of `Trakt lists`**: it must not pass through
-the legacy acquisition source's auto-removal code.
+Select your existing private **Plex Download Queue** under a configured Trakt
+user. Point `Trakt monitoring list` at it and leave `Trakt inbox lists` empty.
+The main queue may also appear in `Trakt lists`: while scheduling is enabled,
+it is excluded from legacy processing and auto-removal. The setting name
+`Trakt monitoring list` is retained for configuration compatibility; it means
+the main queue, not another required list.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `Trakt monitoring list` | empty | `<user>'s private list: Plex Monitored`; empty retains the original loop |
-| `Trakt inbox lists` | empty | Semicolon-separated owned private lists already present in `Trakt lists` |
+| `Trakt monitoring list` | empty | `<user>'s private list: Plex Download Queue`; empty retains the original loop |
+| `Trakt inbox lists` | empty | Optional separate private inboxes; empty disables all transfer operations |
 | `Monitoring poll minutes` | `10` | Trakt membership and Plex library refresh interval; minimum 1 |
 | `Monitoring attempt budget` | `10` | Maximum monitored movie/episode attempts per pass; 1–100 |
 | `Monitoring schedule hours` | `1,24,168,720` | Recent episode, recent movie, mature, catalogue/optional cadence |
@@ -22,7 +28,7 @@ the legacy acquisition source's auto-removal code.
 Recent episodes are <=7 days old; recent movies <=90 days; mature releases are
 <=365 days. Unknown/older release dates use catalogue cadence. Missing baseline
 copies get at least daily opportunities; newly aired missing episodes retain
-the faster episode cadence. Newly added/re-added inbox requests bypass normal
+the faster episode cadence. Observed additions/re-adds to the main queue bypass normal
 cadence, but never release gating, watched exclusions or hard version rules.
 Recent Plex additions get a fresh upgrade window. After the main target is met,
 strictly better preference-ranked copies and optional presentations are checked
@@ -35,24 +41,44 @@ than inferring improvement from a season-pack title. Existing non-inbox Plex, Tr
 Overseerr sources retain their original processing at approximately 30-minute
 intervals; they are outside the new monitored-work budget.
 
-## Inbox semantics
+## Main queue semantics
 
-1. Batch-add absent inbox IDs to the monitoring list.
+- Add an old, new or upcoming title directly to **Plex Download Queue**.
+- Acquired titles remain subscribed to slow, budgeted upgrade checks.
+- Optional presentations do not make every title eligible on every pass.
+- Removing a title stops its background monitoring without deleting media.
+- An observed remove/re-add, or a changed Trakt entry timestamp, wakes a title
+  again without duplicating an existing copy. Re-adds invalidate its cached
+  metadata. A change entirely between polls can be invisible if Trakt does not
+  change the entry timestamp.
+- Successful refreshes with unchanged membership do not keep forcing searches.
+  Failed or partial reads preserve the last successful in-memory snapshot.
+
+The list records **monitoring intent**, not a count of currently actionable
+downloads. Scheduling and file coverage determine what work is actually due.
+
+## Optional inbox (disabled by default)
+
+Only enable this if you want a separate consumable search-request interface.
+Configured inboxes must be distinct owned private lists in `Trakt lists`;
+the main queue cannot be an inbox. With `Trakt inbox lists` empty, no inbox
+reads, enrollment writes or source removals occur.
+
+1. Batch-add absent inbox IDs to the main queue.
 2. Read the destination back and confirm each subscription exists.
 3. Recheck inbox membership/timestamp; remove only the confirmed original
-   requests from that exact inbox.
+   requests from that exact optional inbox, never the main queue.
 4. Wake enrolled titles for evaluation, including old library titles.
 
 Inbox removal means **accepted for ongoing monitoring**, not “all downloads
 complete.” Unavailable/upcoming requests can leave the inbox because their
-subscription remains on Trakt. Add them to the inbox again to request another
-immediate evaluation. Remove a subscription from **Plex Monitored** to stop
-background work; this never deletes media.
+subscription remains in the main queue. Add them to the optional inbox again
+to request another immediate evaluation. The default single-list workflow
+does not use these transfers.
 
 Cross-list changes are not atomic. The add/read-back/remove ordering makes
 retries idempotent; failed/partial membership reads do not erase the previous
-in-memory snapshot. Trakt remains authoritative after restart. A remove/re-add
-entirely between polls can be invisible unless its timestamp changes.
+in-memory snapshot. Trakt remains authoritative after restart.
 
 ## Resource boundaries and compatibility
 
