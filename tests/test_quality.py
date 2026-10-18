@@ -123,6 +123,34 @@ class QualityTests(QualityFixture, unittest.TestCase):
         self.assertIn('Main upgrade', self.names(season))
         self.assertIn('Main upgrade', self.names(plex.current_library[0]))
 
+    def test_managed_main_continues_past_cutoff_legacy_does_not(self):
+        self.library_episode([part(1, 'War.S01E03.2160p.DV.HDR.mkv', '4k')])
+        obj = video()
+        self.assertNotIn('Main upgrade', self.names(obj))
+        obj._monitor_managed = True
+        self.assertIn('Main upgrade', self.names(obj))
+
+    def test_managed_main_rejects_equal_copy_but_accepts_remux(self):
+        import debrid
+        self.library_episode([part(1, 'War.S01E03.2160p.DV.HDR.mkv', '4k')])
+        item = video();item._monitor_managed = True;item.bitrate = lambda: None
+        same = releases.release('', 'torrent', 'War.S01E03.2160p.DV.HDR', [], 3, [])
+        same.cached = ['TB']
+        item.Releases = [same]
+        with patch.object(debrid, 'check'), patch.object(debrid, 'download', return_value=True) as grab:
+            item.debrid_download();grab.assert_not_called()
+        better = releases.release('', 'torrent', 'War.S01E03.2160p.DV.HDR.REMUX', [], 10, [])
+        better.cached = ['TB'];item.Releases = [better]
+        with patch.object(debrid, 'check'), patch.object(debrid, 'download', return_value=True) as grab:
+            item.debrid_download();grab.assert_called_once()
+
+    def test_managed_aggregate_pack_cannot_bypass_leaf_comparator(self):
+        import debrid
+        season = media(NS(type='season', _monitor_managed=True, Episodes=[]))
+        with patch.object(debrid, 'download') as grab, patch.object(debrid, 'check') as check:
+            self.assertEqual(season.debrid_download(), (False, True))
+            grab.assert_not_called();check.assert_not_called()
+
     def test_cleanup_strict_dominance(self):
         from content.quality import superseded
         item = video()

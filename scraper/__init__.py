@@ -3,6 +3,11 @@ from ui.ui_print import *
 import releases
 #import child modules
 from scraper import services
+failed = False
+
+def mark_failed():
+    global failed
+    failed = True
 
 def scrape(query, altquery="(.*)"):
     ui_print('done')
@@ -53,4 +58,8 @@ def traditional():
 
 # Multiprocessing scrape method
 def multi_scrape(cls, query, altquery, result, index):
-    result[index] = cls.scrape(query, altquery)
+    try:
+        result[index] = cls.scrape(query, altquery)
+    except Exception:
+        mark_failed()
+        result[index] = []

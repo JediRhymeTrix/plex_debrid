@@ -723,9 +723,21 @@ class media:
         if quick or library()[0].name != 'Plex Library':
             return [v for v in quality.active_versions(self)
                     if self.query() + ' [' + v.name + ']' not in media.downloaded_versions]
+        if getattr(self, '_monitor_managed', False) and self.downloading():
+            return []
         from content.services.plex import current_library
-        return quality.missing_versions(self, current_library, media.downloaded_versions,
-                                        media.session_releases)
+        pending = quality.missing_versions(self, current_library, media.downloaded_versions,
+                                           media.session_releases)
+        if getattr(self, '_monitor_managed', False):
+            primary = next(iter(quality.active_versions(self, collected=True)), None)
+            existing = quality.existing(self, current_library, media.session_releases)
+            if primary and existing and not any(v.name in (primary.name, primary.name + ' upgrade') for v in pending):
+                rules = copy.deepcopy(primary.rules)
+                for rule in rules:
+                    if rule[1] == 'upgrade':
+                        rule[1] = 'requirement'
+                pending.insert(0, releases.sort.version(primary.name + ' upgrade', primary.triggers, primary.lang, rules))
+        return pending
 
     def version_missing(self):
         if library()[0].name != 'Plex Library':
@@ -762,6 +774,8 @@ class media:
         return None
 
     def upgrade_due(self):
+        if getattr(self, '_monitor_managed', False):
+            return True
         # Pacing for re-evaluating COLLECTED content whose versions are still
         # missing (the upgrade hunt). Movies and episodes run on separate
         # cycles: episodes are hot (their better releases typically arrive
@@ -898,6 +912,8 @@ class media:
     def watch(self):
         global imdb_scraped
         imdb_scraped = False
+        if getattr(self, '_monitor_managed', False):
+            return
         # Failure to find an optional presentation or quality upgrade must not
         # mark an already-acquired item watched/ignored after initial retries.
         from content import quality
@@ -1208,7 +1224,7 @@ class media:
                         force=False)
                     if debrid_downloaded:
                         refresh_ = True
-                        if not retry and (self.watchlist.autoremove == "both" or self.watchlist.autoremove == "movie"):
+                        if not getattr(self, '_monitor_managed', False) and not retry and (self.watchlist.autoremove == "both" or self.watchlist.autoremove == "movie"):
                             self.watchlist.remove([], self)
                         toc = time.perf_counter()
                         ui_print('took ' + str(round(toc - tic, 2)) + 's')
@@ -1345,7 +1361,7 @@ class media:
                             refresh_ = True
                         if result[1]:
                             retry = True
-                    if not retry and (self.watchlist.autoremove == "both" or self.watchlist.autoremove == "show" or self.hasended()):
+                    if not getattr(self, '_monitor_managed', False) and not retry and (self.watchlist.autoremove == "both" or self.watchlist.autoremove == "show" or self.hasended()):
                         self.watchlist.remove([], self)
                     toc = time.perf_counter()
                     ui_print('took ' + str(round(toc - tic, 2)) + 's')
@@ -1357,7 +1373,7 @@ class media:
             # Set the episodes parent releases to be the seasons parent releases:
             scraped_releases = copy.deepcopy(parentReleases)
             # If there is more than one episode
-            if len(self.Episodes) > 2:
+            if len(self.Episodes) > 2 and not getattr(self, '_monitor_managed', False):
                 if self.season_pack(scraped_releases):
                     debrid_downloaded, retry = self.debrid_download()
                     # if scraper.traditional() or debrid_downloaded:
@@ -1528,6 +1544,11 @@ class media:
                 ui_print('[download] no episode file matches; leaving coverage unconfirmed', ui_settings.debug)
 
     def debrid_download(self, force=False):
+        if getattr(self, '_monitor_managed', False) and self.type in ('show', 'season'):
+            # Managed work is budgeted per leaf. A pack title alone cannot prove
+            # a strict improvement for each already-owned episode; let the
+            # existing episode path validate shared parent releases instead.
+            return False, True
         debrid.check(self)
         self.bitrate()
         if len(self.Releases) > 0:
@@ -1557,6 +1578,16 @@ class media:
                 self.version = version
                 self.Releases = copy.deepcopy(scraped_releases)
                 releases.sort(self.Releases, self.version)
+                if getattr(self, '_monitor_managed', False) and self.type in ('movie', 'episode'):
+                    from content import quality
+                    from content.services.plex import current_library
+                    comparison = copy.deepcopy(version)
+                    comparison.rules = [r for r in comparison.rules if r[0] != 'cache status']
+                    existing = quality.existing(self, current_library, media.session_releases)
+                    relevant = [r for r in existing if quality.matches(r, comparison)]
+                    if relevant:
+                        self.Releases = [r for r in self.Releases if all(
+                            quality.strictly_better(r, old, comparison) for old in relevant)]
                 if len(self.Releases) > 0:
                     releases.print_releases(self.Releases, True)
                 ver_dld = False
@@ -1582,6 +1613,8 @@ class media:
                             break
                 if not ver_dld:
                     downloaded += [False]
+                    if self.Releases and getattr(self, '_monitor_managed', False):
+                        self._monitor_retry = True
         return True in downloaded, bool(self.versions())
 
     def files(self):

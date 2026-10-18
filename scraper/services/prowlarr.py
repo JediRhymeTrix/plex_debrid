@@ -13,6 +13,7 @@ def setup(cls, new=False):
     setup(cls,new)
 
 def scrape(query, altquery):
+    import scraper
     from scraper.services import active
     scraped_releases = []
     if 'prowlarr' in active:
@@ -21,15 +22,18 @@ def scrape(query, altquery):
         try:
             response = session.get(url, headers=headers, timeout=60)
         except requests.exceptions.Timeout:
+            scraper.mark_failed()
             ui_print('[prowlarr] error: prowlarr request timed out. Reduce the number of prowlarr indexers or make sure they are healthy.')
             return []
         except :
+            scraper.mark_failed()
             ui_print('[prowlarr] error: prowlarr couldnt be reached. Make sure your prowlarr base url is correctly formatted (default: http://localhost:9696).')
             return []
         if response.status_code == 200:
             try:
                 response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
             except:
+                scraper.mark_failed()
                 ui_print('[prowlarr] error: prowlarr didnt return any data.')
                 return []
             for result in response[:]:
@@ -65,6 +69,8 @@ def scrape(query, altquery):
             for result in results:
                 if not result == [] and not result == None:
                     scraped_releases += result
+        else:
+            scraper.mark_failed()
     return scraped_releases
 
 def resolve(result):

@@ -398,6 +398,9 @@ def unique(lst):
 
 def threaded(stop):
     ui_cls()
+    from content import monitor
+    if monitor.list:
+        return monitor.run(stop)
     def safe_download(element, library):
         try:
             element.download(library=library)

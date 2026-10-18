@@ -141,6 +141,8 @@ def scrape(query, altquery):
             query + ':' + str(int(s)) + ':' + str(int(e)) + '.json'
         response = get(url)
     if not hasattr(response, "streams"):
+        import scraper
+        scraper.mark_failed()
         try:
             if not response == None:
                 ui_print('[torrentio] error: ' + str(response))

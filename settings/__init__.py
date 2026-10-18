@@ -4,6 +4,7 @@ import content
 import scraper
 import releases
 import debrid
+from content import monitor
 from ui import ui_settings
 
 class setting:
@@ -344,6 +345,16 @@ settings_list = [
                                 'Please open your favorite browser, log into this Trakt user and open "https://trakt.tv/activate". Enter this code: '],
                 content.services.trakt, 'users', entry="user", oauth=True, hidden=True),
         setting('Trakt lists', [''], content.services.trakt, 'lists', hidden=True),
+        setting('Trakt monitoring list', 'Owned private monitoring list (empty disables): ', monitor, 'list', hidden=True,
+                help="Opt-in stateless subscriptions. Use <user>'s private list: <name>. Empty preserves the original automation loop. Create this list first; never include it in Trakt lists."),
+        setting('Trakt inbox lists', 'Owned private inboxes separated by semicolons: ', monitor, 'inbox', hidden=True,
+                help="Subset of Trakt lists to consume after confirmed enrollment. Only these exact lists are modified. Monitoring membership survives inbox removal."),
+        setting('Monitoring poll minutes', 'Polling interval in minutes (minimum 1): ', monitor, 'poll_minutes', hidden=True,
+                help="Refresh subscriptions and library metadata at this interval. Default 10. No persistent scheduler or additional service."),
+        setting('Monitoring attempt budget', 'Maximum movie/episode attempts per pass (1..100): ', monitor, 'budget', hidden=True,
+                help="Default 10. Each attempt can reuse normal scraper fallbacks; this is not a literal HTTP-request limit."),
+        setting('Monitoring schedule hours', 'Recent episodes,recent movies,mature,catalogue hours: ', monitor, 'schedule', hidden=True,
+                help="Default 1,24,168,720. Recent means episodes <=7 days or movies <=90 days; mature <=365 days; catalogue older/unknown. Re-adds bypass cadence, never release gating. No permanent age expiry."),
         setting('Trakt auto remove',
                 'Please choose which media type/s should be removed from your watchlist after successful download ("movie","show","both" or "none"): ',
                 content.services.trakt.watchlist, 'autoremove', hidden=True,

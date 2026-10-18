@@ -53,6 +53,7 @@ def setup(cls, new=False):
                     active += [cls.name]
 
 def scrape(query, altquery):
+    import scraper
     from scraper.services import active
     global base_url
     scraped_releases = []
@@ -63,12 +64,15 @@ def scrape(query, altquery):
         try:
             response = session.get(url, timeout=60)
         except requests.exceptions.Timeout:
+            scraper.mark_failed()
             ui_print('[jackett] error: jackett request timed out. Reduce the number of jackett indexers, make sure your indexers are healthy and enable the jackett setting "CORS".')
             return []
         except :
+            scraper.mark_failed()
             ui_print('[jackett] error: jackett couldnt be reached. Make sure your jackett base url is correctly formatted (default: http://localhost:9117).')
             return []
         if not response.status_code == 200:
+            scraper.mark_failed()
             if response.status_code in [401,403]:
                 ui_print('[jackett] error '+str(response.status_code)+': it seems your api key is not working.')
             else:
@@ -77,6 +81,7 @@ def scrape(query, altquery):
         try:
             response = json.loads(response.content, object_hook=lambda d: SimpleNamespace(**d))
         except:
+            scraper.mark_failed()
             ui_print('[jackett] error: jackett didnt return any data.')
             return []
         for result in response.Results[:]:

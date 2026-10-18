@@ -196,7 +196,7 @@ def refresh(user):
     return True
 
 def logerror(response):
-    if not response.status_code == 200:
+    if not 200 <= response.status_code < 300:
         ui_print("[trakt] error: " + str(response.content), debug=ui_settings.debug)
     if response.status_code == 401:
         import time as _time
@@ -545,7 +545,7 @@ class watchlist(classes.watchlist):
         shows = []
         movies = []
         deleted = False
-        if element.type == 'tv':
+        if element.type in ('tv', 'show'):
             for ids in element.ids.__dict__.copy():
                 value = getattr(element.ids, ids)
                 if not value:
