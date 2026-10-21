@@ -16,6 +16,23 @@ suppression, pending-grab reconciliation/expiry, per-episode pack coverage,
 retry limits, actual rule ordering/ties, missing keepers, playback, failed
 requests, shared files, and isolated TorBox backend identification.
 
+## Newznab discovery
+
+`test_newznab.py` verifies canonical and historical source-name casing,
+default/explicit source selection, shared setup, and episode title queries
+whose IMDb ID is carried in the companion matching expression. It also
+checks that torrent and Usenet results are combined before ranking, a
+2160p DV/HDR/Atmos candidate outranks a cached 1080p fallback, and missing
+Usenet results/identity do not discard torrent results. All indexer requests
+are mocked; no NZBs are downloaded and no provider jobs are submitted.
+
+Configure `newznab` in `Sources`, plus `Newznab Base URL` and `Newznab API Key`.
+The historical `Newznab` spelling remains accepted. Default source selection
+queries enabled adapters together; quality ranking—not protocol ordering—
+chooses among their combined results. Upgrade targets still permit a playable
+fallback when no preferred copy is discovered. This does not guarantee that
+an indexer lists a release, or that a listed NZB can be completed by TorBox.
+
 ## Queue retirement
 
 `test_retirement.py` covers `off`, recommended-default `target-met` (90-day

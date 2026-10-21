@@ -3,7 +3,7 @@ from base import *
 from ui.ui_print import *
 import releases
 
-name = "Newznab"
+name = "newznab"
 session = custom_session()
 # indexers sit behind bot protection which rejects the default python-requests user agent
 session.headers.update({
@@ -13,40 +13,8 @@ base_url = 'https://nzbplanet.net/api'
 api_key = ''
 
 def setup(cls, new=False):
-    from settings import settings_list
-    settings = []
-    for category, allsettings in settings_list:
-        for setting in allsettings:
-            if setting.cls == cls:
-                settings += [setting]
-    if settings == []:
-        if not cls.name in active:
-            active += [cls.name]
-    back = False
-    if not new:
-        while not back:
-            print("0) Back")
-            indices = []
-            for index, setting in enumerate(settings):
-                print(str(index + 1) + ') ' + setting.name)
-                indices += [str(index + 1)]
-            print()
-            if settings == []:
-                print("Nothing to edit!")
-                print()
-                time.sleep(3)
-                return
-            choice = input("Choose an action: ")
-            if choice in indices:
-                settings[int(choice) - 1].input()
-                if not cls.name in active:
-                    active += [cls.name]
-                back = True
-            elif choice == '0':
-                back = True
-    else:
-        if not cls.name in active:
-            active += [cls.name]
+    from scraper.services import setup
+    setup(cls, new)
 
 def get(url, params=None):
     params = params or {}
@@ -78,13 +46,15 @@ def resolve_title(type, imdb_id):
 def scrape(query, altquery):
     from scraper.services import active
     scraped_releases = []
-    if not 'newznab' in active:
+    if not any(source.casefold() == name for source in active):
         return scraped_releases
     if api_key == '':
         ui_print('[newznab] error: no api key set', debug=ui_settings.debug)
         return scraped_releases
     type = ("show" if regex.search(r'(S[0-9]|complete|S\?[0-9])', altquery, regex.I) else "movie")
-    imdb = regex.search(r'(tt[0-9]+)', str(query), regex.I)
+    # Episode callers pass a title query and retain the IMDb ID in altquery.
+    imdb = (regex.search(r'(tt[0-9]+)', str(query), regex.I)
+            or regex.search(r'(tt[0-9]+)', str(altquery), regex.I))
     if imdb is None:
         ui_print('[newznab] error: no imdb id found for query: ' + str(query), debug=ui_settings.debug)
         return scraped_releases

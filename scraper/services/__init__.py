@@ -25,7 +25,7 @@ def setup(cls, new=False):
             if setting.cls == cls:
                 settings += [setting]
     if settings == []:
-        if not cls.name in active:
+        if not any(s.casefold() == cls.name.casefold() for s in active):
             active += [cls.name]
     back = False
     if not new:
@@ -44,7 +44,7 @@ def setup(cls, new=False):
             choice = input("Choose an action: ")
             if choice in indices:
                 settings[int(choice) - 1].setup()
-                if not cls.name in active:
+                if not any(s.casefold() == cls.name.casefold() for s in active):
                     active += [cls.name]
                 back = True
             elif choice == '0':
@@ -54,7 +54,7 @@ def setup(cls, new=False):
         indices = []
         for setting in settings:
             setting.setup()
-            if not cls.name in active:
+            if not any(s.casefold() == cls.name.casefold() for s in active):
                 active += [cls.name]
 
 def get():
@@ -62,7 +62,7 @@ def get():
     activeservices = []
     for servicename in active:
         for service in cls.__subclasses__():
-            if service.name == servicename:
+            if service.name.casefold() == servicename.casefold():
                 activeservices += [service]
     return activeservices
 
@@ -74,7 +74,7 @@ def sequential():
         activesequence = []
         for servicename in sequence:
             for service in cls.__subclasses__():
-                if service.name == servicename:
+                if service.name.casefold() == servicename.casefold():
                     activesequence += [service]
         activeservices += [activesequence]
     return activeservices
