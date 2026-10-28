@@ -57,6 +57,13 @@ def timestamp(value):
         return 0
 
 
+def release_time(obj):
+    # media.released is also a method; never let that truthy bound method mask
+    # the actual originallyAvailableAt date during cadence/release checks.
+    return next((stamp for name in ('first_aired', 'released', 'originallyAvailableAt')
+                 if (stamp := timestamp(getattr(obj, name, None)))), 0)
+
+
 def key(row):
     kind = getattr(row, 'type', '')
     obj = getattr(row, kind, None) if kind in ('movie', 'show') else None
@@ -166,10 +173,9 @@ class Worker:
 
     def interval(self, identity, obj, now):
         from content import quality
-        date = timestamp(getattr(obj, 'first_aired', None) or getattr(obj, 'released', None)
-                         or getattr(obj, 'originallyAvailableAt', None))
+        date = release_time(obj)
         age = (now - date) / 86400 if date else 366
-        if identity[0] == 'episode' and age <= 7:
+        if identity[0] in ('movie', 'episode') and age <= 7:
             return self.hours[0] * 3600
         found = quality.library_match(obj, self.library) if getattr(obj, 'type', None) in ('movie', 'episode') else None
         if found and getattr(found, 'addedAt', None):
@@ -184,8 +190,7 @@ class Worker:
         return self.hours[2] * 3600
 
     def due(self, identity, obj, now, force=False, optional=False):
-        date = timestamp(getattr(obj, 'first_aired', None) or getattr(obj, 'released', None)
-                         or getattr(obj, 'originallyAvailableAt', None))
+        date = release_time(obj)
         if date > now:
             return False
         period = self.hours[3] * 3600 if optional else self.interval(identity, obj, now)
@@ -303,7 +308,12 @@ class Worker:
             primary_version = next(iter(quality.active_versions(obj, collected=True)), None)
             existing = quality.existing(obj, self.library, media.session_releases)
             reached = bool(primary_version and any(quality.matches(r, primary_version, True) for r in existing))
-            return reached or (bool(pending) and not any(v.name in (primary, primary + ' upgrade') for v in pending))
+            # Existing buckets remain upgradeable, even after their nominal
+            # presentation target is met. Rare missing alternates stay slow.
+            owned_upgrade = any(v.name.endswith(' upgrade') and any(quality.matches(r, v) for r in existing)
+                                for v in pending)
+            return not owned_upgrade and (reached or (bool(pending) and not any(
+                v.name in (primary, primary + ' upgrade') for v in pending)))
         if item.type == 'movie':
             pending = item.versions()
             if not pending or item.watched() or item.downloading():
@@ -417,7 +427,7 @@ class Worker:
             identity = key(row)
             force = identity in self.wake_since
             obj = getattr(row, identity[0])
-            if timestamp(getattr(obj, 'first_aired', None) or getattr(obj, 'released', None)) > now:
+            if release_time(obj) > now:
                 continue
             if identity[0] == 'movie':
                 obj.type, obj.EID = 'movie', trakt.setEID(obj)

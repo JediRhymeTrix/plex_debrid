@@ -2,6 +2,7 @@
 from base import *
 from ui.ui_print import *
 import releases
+import math
 
 # (required) Name of the Debrid service
 name = "TorBox"
@@ -61,10 +62,11 @@ def post(url, data):
 def delete(torrent_id):
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36','Authorization': 'Bearer ' + api_key}
     try:
-        session.post(base_url + '/torrents/controltorrent', headers=headers, json={'operation': 'delete', 'torrent_id': torrent_id}, timeout=60)
+        response = session.post(base_url + '/torrents/controltorrent', headers=headers, json={'operation': 'delete', 'torrent_id': torrent_id}, timeout=60)
+        return response.status_code == 200 and response.json().get('success') is True
     except Exception as e:
         ui_print("[torbox] error: (delete exception): " + str(e), debug=ui_settings.debug)
-    return None
+    return False
 
 # get a direct download link for a file of a torrent
 def requestdl(torrent_id, file_id):
@@ -134,86 +136,152 @@ class version:
             if file.unwanted:
                 self.unwanted += 1
 
+def _defer(reason):
+    from debrid import Deferred
+    raise Deferred('TorBox torrent: ' + reason)
+
+
+def _inventory():
+    """Reuse provider jobs, including pending ones; never delete pre-existing work."""
+    inventory = []
+    for offset in range(0, 10000, 1000):
+        response = get(base_url + '/torrents/mylist?bypass_cache=true&limit=1000&offset=' + str(offset))
+        if response is not None and getattr(response, 'success', None) is False:
+            return False
+        rows = getattr(response, 'data', None)
+        if not isinstance(rows, list):
+            _defer('inventory unavailable')
+        if any(getattr(row, 'id', None) is None or not isinstance(getattr(row, 'hash', None), str) for row in rows):
+            _defer('inventory malformed')
+        inventory.extend(rows)
+        if len(rows) < 1000:
+            return inventory
+    _defer('inventory exceeds safety bound')
+
+
+def _existing(element, release):
+    from debrid import provider_inventory
+    rows = provider_inventory(element, short, _inventory)
+    if rows is False:
+        return False
+    matches = [row for row in rows if row.hash.lower() == release.hash.lower()]
+    if not matches:
+        return None
+    matches.sort(key=lambda row: getattr(row, 'download_state', '') not in ('cached', 'completed'))
+    return matches[0].id
+
+
+def _cleanup(torrent_id):
+    if not delete(torrent_id):
+        _defer('cached probe cleanup uncertain')
+
+
+def _complete(element, release, torrent, wanted, force):
+    raw_files = getattr(torrent, 'files', None)
+    if not isinstance(raw_files, list):
+        _defer('file metadata unavailable')
+    wanted_patterns = [(key, regex.compile('(' + key + ')', regex.I)) for key in wanted]
+    unwanted_patterns = [(key, regex.compile('(' + key + ')', regex.I)) for key in releases.sort.unwanted]
+    if any(not isinstance(getattr(f, 'name', None), str) or not f.name
+           or getattr(f, 'id', None) is None
+           or not isinstance(getattr(f, 'size', None), (int, float))
+           or not math.isfinite(f.size) or f.size <= 0 for f in raw_files):
+        _defer('file metadata incomplete')
+    if len({str(f.id) for f in raw_files}) != len(raw_files):
+        _defer('file identity ambiguous')
+    try:
+        files = [file(f.id, f.name, f.size, wanted_patterns, unwanted_patterns) for f in raw_files]
+    except (AttributeError, TypeError, ValueError):
+        _defer('file metadata incomplete')
+    safe_ids = {str(f.id) for f in files}
+    if not force:
+        from debrid.services.torbox_usenet import files_for
+        safe = files_for(torrent, wanted)
+        if safe is None:
+            _defer('wanted video file metadata or coverage uncertain')
+        safe_ids = {str(f.id) for f in safe}
+        for f in files:
+            if str(f.id) in safe_ids:
+                basename = regex.split(r'[/\\]', f.name)[-1]
+                f.match = next(key for key in wanted if regex.search('(?:' + key + r')(?!\d)', basename, regex.I))
+                f.wanted = True
+    selected = [f for f in files if str(f.id) in safe_ids]
+    if not selected:
+        return False
+    staged = copy.deepcopy(release)
+    staged.files = selected
+    staged.size = sum(f.size for f in selected)
+    staged.wanted = sum(f.wanted for f in selected)
+    staged.unwanted = sum(f.unwanted for f in selected)
+    if 'TB' not in staged.cached:
+        staged.cached.append('TB')
+    from content import quality
+    if not quality.confirmed(element, staged):
+        return False
+    links = []
+    for f in selected:
+        link = requestdl(torrent.id, f.id)
+        if not isinstance(link, str) or not link.startswith(('https://', 'http://')):
+            # A link failure does not prove these files are unwanted. Retain
+            # even a newly created needed job for a later retry, not deletion.
+            _defer('wanted file link unavailable')
+        links.append(link)
+    staged.download = links
+    release.__dict__.update(staged.__dict__)
+    return True
+
+
 # (required) Download Function.
 def download(element, stream=True, query='', force=False):
-    cached = element.Releases
-    if query == '':
-        query = element.deviation()
-    wanted = [query]
-    if not isinstance(element, releases.release):
-        wanted = element.files()
-    for release in cached[:]:
-        # if release matches query
-        if regex.match(query, release.title,regex.I) or force:
-            if release.type == 'usenet':
-                # nzb release: add it to torbox as a usenet download
-                return download_usenet(release, element, wanted)
-            # post magnet to torbox
-            try:
-                response = post(base_url + '/torrents/createtorrent', {'magnet': str(release.download[0]), 'seed': 2, 'allow_zip': False, 'name': release.title})
-                torrent_id = response.data.torrent_id
-            except:
-                ui_print('[torbox] error: could not add magnet for release: ' + release.title, ui_settings.debug)
+    query = query or element.deviation()
+    wanted = [query] if isinstance(element, releases.release) else element.files()
+    for release in element.Releases[:]:
+        if not (force or regex.match(query, release.title, regex.I)):
+            continue
+        if release.type == 'usenet':
+            return download_usenet(release, element, wanted)
+        if not regex.fullmatch(r'[a-fA-F0-9]{40}', release.hash):
+            continue
+        torrent_id = _existing(element, release)
+        if torrent_id is False:
+            continue
+        created = False
+        if torrent_id is None:
+            if stream and 'TB' not in release.cached:
+                continue  # Unknown cache: inventory-only, never blind uncached add.
+            if not release.download:
                 continue
-            if stream:
-                torrent = get_torrent(torrent_id)
-                if torrent is None:
-                    ui_print('[torbox] error: could not get torrent info for release: ' + release.title, ui_settings.debug)
-                    delete(torrent_id)
-                    continue
-                # if the torrent is cached on torbox, all of its files are instantly available for direct download
-                if torrent.download_state in ["cached","completed"] and torrent.download_present:
-                    # check if the release contains any of the wanted files
-                    unwanted = releases.sort.unwanted
-                    wanted_patterns = list(zip(wanted, [regex.compile(r'(' + key + ')', regex.IGNORECASE) for key in wanted]))
-                    unwanted_patterns = list(zip(unwanted, [regex.compile(r'(' + key + ')', regex.IGNORECASE) for key in unwanted]))
-                    version_files = []
-                    for file_ in torrent.files or []:
-                        version_files.append(file(file_.id, file_.name, file_.size, wanted_patterns, unwanted_patterns))
-                    torrent_version = version(version_files)
-                    if len(torrent_version.files) == 0:
-                        ui_print('[torbox] error: no files could be selected for release: ' + release.title, ui_settings.debug)
-                        delete(torrent_id)
-                        continue
-                    if torrent_version.wanted > 0 or force:
-                        release.files = torrent_version.files
-                        release.download = []
-                        for file_ in torrent_version.files:
-                            if force or file_.wanted:
-                                link = requestdl(torrent_id, file_.id)
-                                if link is not None:
-                                    release.download += [link]
-                        ui_print('[torbox] adding cached release: ' + release.title)
-                        if not torrent.name == "":
-                            release.title = torrent.name
-                        return True
-                    else:
-                        ui_print('[torbox] error: release: "' + release.title + '" does not contain any of the wanted files.', ui_settings.debug)
-                        delete(torrent_id)
-                        continue
-                else:
-                    # torrent is not cached. if uncached downloads are allowed by the version rules, add it to torbox for downloading.
-                    import debrid as db
-                    debrid_uncached = False
-                    if db.uncached == 'true':
-                        debrid_uncached = True
-                        if hasattr(element,"version"):
-                            for i,rule in enumerate(element.version.rules):
-                                if (rule[0] == "cache status") and (rule[1] == 'requirement' or rule[1] == 'preference') and (rule[2] == "cached"):
-                                    debrid_uncached = False
-                    if debrid_uncached:
-                        db.downloading += [element.query() + ' [' + element.version.name + ']']
-                        ui_print('[torbox] adding uncached release: ' + release.title)
-                        return True
-                    else:
-                        ui_print('[torbox] error: release: "' + release.title + '" is not cached on torbox.', ui_settings.debug)
-                        delete(torrent_id)
-                        continue
-            else:
-                ui_print('[torbox] adding uncached release: ' + release.title)
-                return True
-        else:
-            ui_print('[torbox] error: rejecting release: "' + release.title + '" because it doesnt match the allowed deviation', ui_settings.debug)
+            from debrid import invalidate_inventory
+            invalidate_inventory(element, short)
+            response = post(base_url + '/torrents/createtorrent',
+                            {'magnet': str(release.download[0]), 'seed': 2, 'allow_zip': False, 'name': release.title})
+            if response is not None and getattr(response, 'success', None) is False:
+                continue
+            torrent_id = getattr(getattr(response, 'data', None), 'torrent_id', None)
+            if torrent_id is None:
+                _defer('submission outcome uncertain')
+            created = True
+        torrent = get_torrent(torrent_id, retries=1)
+        if torrent is None:
+            _defer('torrent info unavailable')
+        if (str(getattr(torrent, 'id', '')) != str(torrent_id)
+                or str(getattr(torrent, 'hash', '')).lower() != release.hash.lower()):
+            _defer('torrent identity changed')
+        state = getattr(torrent, 'download_state', '')
+        if state in ('failed', 'error', 'cancelled', 'canceled'):
+            if created:
+                _cleanup(torrent_id)
+            continue
+        if state not in ('cached', 'completed') or getattr(torrent, 'download_present', False) is not True:
+            if created and stream and state in ('queued', 'downloading', 'uploading', 'metaDL', 'checking'):
+                _cleanup(torrent_id)
+                continue
+            _defer('torrent still pending')
+        if _complete(element, release, torrent, wanted, force):
+            ui_print('[torbox] adding cached release: ' + release.title)
+            return True
+        if created:
+            _cleanup(torrent_id)
     return False
 
 # (required) Check Function

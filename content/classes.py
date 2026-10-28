@@ -728,15 +728,6 @@ class media:
         from content.services.plex import current_library
         pending = quality.missing_versions(self, current_library, media.downloaded_versions,
                                            media.session_releases)
-        if getattr(self, '_monitor_managed', False):
-            primary = next(iter(quality.active_versions(self, collected=True)), None)
-            existing = quality.existing(self, current_library, media.session_releases)
-            if primary and existing and not any(v.name in (primary.name, primary.name + ' upgrade') for v in pending):
-                rules = copy.deepcopy(primary.rules)
-                for rule in rules:
-                    if rule[1] == 'upgrade':
-                        rule[1] = 'requirement'
-                pending.insert(0, releases.sort.version(primary.name + ' upgrade', primary.triggers, primary.lang, rules))
         return pending
 
     def version_missing(self):
@@ -1550,6 +1541,8 @@ class media:
     def debrid_download(self, force=False):
         if getattr(self, '_debrid_deferred', False):
             return False, True
+        # Disposable provider snapshots may be reused only inside this attempt.
+        self._provider_inventory = {}
         if getattr(self, '_monitor_managed', False) and self.type in ('show', 'season'):
             # Managed work is budgeted per leaf. A pack title alone cannot prove
             # a strict improvement for each already-owned episode; let the
@@ -1592,23 +1585,34 @@ class media:
                         debrid_uncached = False
                 self.version = version
                 self.Releases = copy.deepcopy(scraped_releases)
-                releases.sort(self.Releases, self.version)
+                ranking = copy.deepcopy(self.version)
+                for rule in ranking.rules:
+                    if rule[1] == 'upgrade':
+                        rule[1] = 'preference'
+                # Actual cache availability is verified by providers; RD's
+                # disabled availability endpoint is uncertainty, not rejection.
+                ranking.rules = [r for r in ranking.rules if not (
+                    r[0] == 'cache status' and r[1] == 'requirement')]
+                releases.sort(self.Releases, ranking)
                 if getattr(self, '_monitor_managed', False) and self.type in ('movie', 'episode'):
                     from content import quality
                     from content.services.plex import current_library
                     comparison = copy.deepcopy(version)
                     comparison.rules = [r for r in comparison.rules if r[0] != 'cache status']
                     existing = quality.existing(self, current_library, media.session_releases)
-                    relevant = [r for r in existing if quality.matches(r, comparison)]
-                    if relevant:
-                        self.Releases = [r for r in self.Releases if all(
-                            quality.strictly_better(r, old, comparison) for old in relevant)]
+                    self.Releases = [r for r in self.Releases if quality.accepts(r, existing, comparison)]
                 if len(self.Releases) > 0:
                     releases.print_releases(self.Releases, True)
                 ver_dld = False
-                for release in copy.deepcopy(self.Releases):
+                candidates = copy.deepcopy(self.Releases)
+                torrents = [r for r in candidates if r.type == 'torrent']
+                # Availability governs acquisition order, never target coverage.
+                torrents.sort(key=lambda r: not bool(getattr(r, 'cached', [])))
+                attempts = ([(r, True) for r in torrents]
+                            + [(r, True) for r in candidates if r.type == 'usenet']
+                            + ([(r, False) for r in torrents] if debrid_uncached else []))
+                for release, cached in attempts:
                     self.Releases = [release,]
-                    cached = bool(getattr(release, 'cached', []))
                     if not cached and (self.type == 'show' or not debrid_uncached):
                         continue
                     try:
@@ -1623,14 +1627,12 @@ class media:
                         self.downloaded()
                         if 'imax' in str(release.title).lower():
                             imax_downloaded = True
-                        if not cached:
-                            debrid.downloading += [self.query() + ' [' + self.version.name + ']']
                         downloaded += [True]
                         ver_dld = True
                         break
                 if not ver_dld:
                     downloaded += [False]
-                    if self.Releases and getattr(self, '_monitor_managed', False):
+                    if self.Releases and getattr(self, '_monitor_managed', False) and scraper.failed:
                         self._monitor_retry = True
         return True in downloaded, bool(self.versions())
 

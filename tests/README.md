@@ -28,8 +28,9 @@ are mocked; no NZBs are downloaded and no provider jobs are submitted.
 
 Configure `newznab` in `Sources`, plus `Newznab Base URL` and `Newznab API Key`.
 The historical `Newznab` spelling remains accepted. Default source selection
-queries enabled adapters together; quality ranking—not protocol ordering—
-chooses among their combined results. Upgrade targets still permit a playable
+queries enabled adapters together. Acquisition prefers verified cached torrents,
+then Usenet, then permitted uncached torrents; quality ranks within each wave.
+Upgrade targets still permit a playable
 fallback when no preferred copy is discovered. This does not guarantee that
 an indexer lists a release, or that a listed NZB can be completed by TorBox.
 
@@ -83,10 +84,27 @@ without changing acquisition, quality upgrades or superseded cleanup.
 Cleanup is opt-in; both `Library upgrade remove superseded files = true` and
 an explicit `Library upgrade cleanup TorBox root` are needed. It only removes
 a strictly dominated **single-file TorBox torrent** when another independently
-identified TorBox download satisfies all the old copy's applicable targets.
+identified TorBox download strictly improves it without regressing fulfilled
+targets or protected quality/presentation features. Intermediate improvements
+do not have to meet every still-unmet target at once.
 Distinct cuts, languages, presentations, tied preferences, unsupported rules,
 season packs, shared paths, unknown mappings and Real-Debrid downloads are
 retained. IMAX, 3D and Open Matte are deliberately excluded from deletion.
+
+## Autonomous decisions and provider fallback
+
+`test_decisions.py` covers progressive SDR/HDR/DV improvements, protected stereo
+and expanded presentations, inherited optional quality preferences, duplicate
+and pending-grab acknowledgement, actual provider filename contradictions,
+release-date cadence and mandatory Usenet discovery across scraper groups.
+
+`test_provider_routing.py` covers RD/TB preference, disabled/unknown cache checks,
+actual inventory/status/link validation, explicit refusals versus uncertainty,
+safe new-probe cleanup versus pre-existing/pending retention, per-attempt bounded
+inventory reuse, third-provider/explicit tracker-route compatibility and HTTP
+timeouts. Cache routing never fabricates positive cache facts. Unknown accepted
+work defers; explicit RD refusal can try TB. All requests are mocked; no provider
+downloads, deletions or credential-bearing URLs occur during the suite.
 
 Execution rechecks Plex metadata with `checkFiles`, playback, file accessibility,
 replacement byte availability and fresh provider inventory. Deletion targets

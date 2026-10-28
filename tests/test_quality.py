@@ -181,14 +181,14 @@ class QualityTests(QualityFixture, unittest.TestCase):
                       part(2, 'War.S01E03.2160p.REMUX.mkv', '4k')]
         self.assertEqual(superseded(item), [])
 
-    def test_cleanup_respects_actual_rule_order(self):
+    def test_cleanup_never_trades_resolution_down_for_size_preference(self):
         from content.quality import superseded
         releases.sort.versions = [versions()[0]]
         releases.sort.versions[0][3] = [['size', 'preference', 'highest', '']]
         item = video()
         item.Media = [part(1, 'War.S01E03.1080p.mkv', size=10_000_000_000),
                       part(2, 'War.S01E03.2160p.mkv', '4k', size=1_000_000_000)]
-        self.assertEqual([(x.id, y.id) for x, y in superseded(item)], [('2', '1')])
+        self.assertEqual(superseded(item), [])
 
     def test_cleanup_unknown_rules_fail_closed(self):
         from content.quality import superseded
@@ -311,12 +311,12 @@ class QualityTests(QualityFixture, unittest.TestCase):
         item = video(); item.ignored_count = 0
         self.assertNotIn('Main upgrade', self.names(item))
 
-    def test_cleanup_requires_joint_target_even_for_fallbacks(self):
+    def test_cleanup_accepts_strict_intermediate_resolution_progress(self):
         from content.quality import superseded
         item = video()
         item.Media = [part(1, 'War.S01E03.720p.mkv', '720'),
                       part(2, 'War.S01E03.1080p.mkv')]
-        self.assertEqual(superseded(item), [])
+        self.assertEqual([(x.id, y.id) for x, y in superseded(item)], [('1', '2')])
 
     def test_transport_source_is_not_a_reason_to_reacquire_plex_file(self):
         releases.sort.versions = [['Source', [], 'en', [['source', 'requirement', 'include', 'Torrentio']]]]

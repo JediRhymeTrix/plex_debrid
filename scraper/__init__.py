@@ -14,6 +14,12 @@ def scrape(query, altquery="(.*)"):
     scrapers = services.sequential()
     if len(scrapers) == 0:
         scrapers = [services.get()]
+    # Explicit torrent source groups may short-circuit one another, but must
+    # never hide enabled Usenet discovery. Query Newznab exactly once up front.
+    usenet = next((s for s in services.get() if s.name.casefold() == 'newznab'), None)
+    if usenet is not None:
+        scrapers = [[s for s in group if s is not usenet] for group in scrapers]
+        scrapers[0].append(usenet)
     scraped_releases = []
     for sequence in scrapers:
         servicenames = "[" + ",".join(x.name for x in sequence) + "]"
@@ -42,7 +48,7 @@ def scrape(query, altquery="(.*)"):
         for release in scraped_releases:
             release.title = ''.join([i if ord(i) < 512 else '' for i in release.title])
         ui_print('done - found ' + str(len(scraped_releases)) + ' releases')
-        if len(scraped_releases) > 0:
+        if any(r.type != 'usenet' for r in scraped_releases):
             break
     return scraped_releases
 

@@ -354,7 +354,7 @@ settings_list = [
         setting('Monitoring attempt budget', 'Maximum movie/episode attempts per pass (1..100): ', monitor, 'budget', hidden=True,
                 help="Default 10. Each attempt can reuse normal scraper fallbacks; this is not a literal HTTP-request limit."),
         setting('Monitoring schedule hours', 'Recent episodes,recent movies,mature,catalogue hours: ', monitor, 'schedule', hidden=True,
-                help="Default 1,24,168,720. Recent means episodes <=7 days or movies <=90 days; mature <=365 days; catalogue older/unknown. Re-adds bypass cadence, never release gating. No permanent age expiry."),
+                help="Default 1,24,168,720. Movies/episodes <=7 days use the first cadence, movies <=90 days daily; mature <=365 days weekly; older/unknown and missing rare alternates catalogue. Existing buckets continue strict quality improvement. Re-adds bypass cadence, never release gating."),
         setting('Monitoring retirement policy', 'off, target-met or playable-after-grace: ', monitor, 'retirement_policy', hidden=True,
                 help="Default target-met: retire settled queue entries meeting the main quality target. playable-after-grace accepts a verified playable fallback satisfying hard requirements; off retains subscriptions. Ongoing/upcoming/incomplete/unknown media never auto-expire. Removal stops future monitoring, not media playback."),
         setting('Monitoring retirement grace days', 'Positive retirement grace in days: ', monitor, 'retirement_grace_days', hidden=True,

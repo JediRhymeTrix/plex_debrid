@@ -241,23 +241,9 @@ def finish(release, row, selected, wanted, element):
     staged.wanted = len(staged.files)
     staged.size = sum(f.size for f in staged.files)
     from content import quality
-    if hasattr(element, 'version') and not quality.matches(staged, element.version):
+    if not quality.confirmed(element, staged):
         torbox.ui_print('[torbox] existing Usenet files do not meet this version; retained')
         return False
-    if getattr(element, '_monitor_managed', False):
-        from content.classes import media
-        from content.services.plex import current_library
-        comparison = copy.deepcopy(element.version)
-        comparison.rules = [r for r in comparison.rules if r[0] != 'cache status']
-        existing = [r for r in quality.existing(element, current_library, media.session_releases)
-                    if quality.matches(r, comparison)]
-        ranked = copy.deepcopy(staged)
-        ranked.wanted = ranked.unwanted = 0
-        comparisons = copy.deepcopy(existing)
-        for old in comparisons:
-            old.wanted = old.unwanted = 0
-        if comparisons and not all(quality.strictly_better(ranked, old, comparison) for old in comparisons):
-            return False
     links = [request_link(row.id, file.id) for file in selected]
     if not all(links):
         defer('wanted video link unavailable')

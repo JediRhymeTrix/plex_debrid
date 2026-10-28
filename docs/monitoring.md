@@ -24,18 +24,20 @@ the main queue, not another required list.
 | `Trakt inbox lists` | empty | Optional separate private inboxes; empty disables all transfer operations |
 | `Monitoring poll minutes` | `10` | Trakt membership and Plex library refresh interval; minimum 1 |
 | `Monitoring attempt budget` | `10` | Maximum monitored movie/episode attempts per pass; 1–100 |
-| `Monitoring schedule hours` | `1,24,168,720` | Recent episode, recent movie, mature, catalogue/optional cadence |
+| `Monitoring schedule hours` | `1,24,168,720` | New <=7-day release, recent movie, mature, catalogue/missing-alternate cadence |
 | `Monitoring retirement policy` | `target-met` | `off`, `target-met`, or `playable-after-grace` |
 | `Monitoring retirement grace days` | `90` | Positive grace from the latest required factual date |
 
-Recent episodes are <=7 days old; recent movies <=90 days; mature releases are
-<=365 days. Unknown/older release dates use catalogue cadence. Missing baseline
-copies get at least daily opportunities; newly aired missing episodes retain
-the faster episode cadence. Observed additions/re-adds to the main queue bypass normal
+New movies and episodes <=7 days old use the first (default hourly) cadence;
+movies <=90 days use daily cadence, mature releases <=365 days use weekly.
+Unknown/older release dates use catalogue cadence. Missing baseline copies get
+at least daily opportunities; newly released items retain the faster cadence.
+Observed additions/re-adds to the main queue bypass normal
 cadence, but never release gating, watched exclusions or hard version rules.
-Recent Plex additions get a fresh upgrade window. After the main target is met,
-strictly better preference-ranked copies and optional presentations are checked
-at catalogue cadence. Nothing expires solely because it is old or searches
+Recent Plex additions get a fresh upgrade window. Existing main/presentation
+buckets keep receiving age-paced, strictly improving quality checks even after
+their nominal target is met. Missing rare alternate presentations use catalogue
+cadence unless main work already makes the item due. Nothing expires solely because it is old or searches
 return no results; retirement additionally requires verified playable coverage.
 
 One pass runs approximately each minute, cooperatively in the existing service.
@@ -60,6 +62,41 @@ intervals; they are outside the new monitored-work budget.
 
 The list records **monitoring intent**, not a count of currently actionable
 downloads. Scheduling and file coverage determine what work is actually due.
+
+## Progressive quality and acquisition decisions
+
+- Upgrade targets describe the destination, not an all-at-once admission gate:
+  a valid `2160p SDR -> 2160p HDR -> 2160p DV+HDR` progression stays actionable.
+  Already met targets, resolution, admitted presentation/cut/language features
+  and positive title preferences are protected from regression. Hard requirements
+  remain hard. Preference-ranked ties are never reacquired just for a provider.
+- 3D remains independent and cannot masquerade as the ordinary main copy. IMAX
+  takes precedence over Open Matte for expanded framing, not over the 3D bucket.
+  Protected alternate copies do not veto a better main copy, nor does a better
+  main copy authorize deleting them. Existing optional buckets remain upgradeable
+  and inherit missing primary intrinsic quality preferences/soft targets, preserving their own
+  admission requirements and configured rule order.
+- Superseded planning uses the same monotonic per-file quality comparison, so a
+  proven intermediate improvement can supersede an SDR fallback. All actual
+  deletion safeguards remain: only isolated, verified single-file TorBox torrents,
+  fresh readable keepers, no shared/ambiguous references, no protected 3D/IMAX/
+  Open Matte deletion, no automatic Usenet acquisition deletion.
+- Enabled Newznab discovery runs once even when explicit torrent scraper groups
+  return early. Usenet results do not short-circuit later torrent fallback groups.
+- Acquisition tries cached torrent candidates first, then Usenet, then permitted
+  uncached torrents. Quality ranking applies within each wave. RD is preferred
+  when both providers can serve a torrent; TB is preferred when only TB is known
+  cached. Unknown cache status is not success and not a known negative: actual
+  provider status and usable wanted links must verify readiness. An explicit RD
+  refusal can fall through to TB. Uncertain accepted/pending jobs defer rather
+  than spawning a second download elsewhere.
+
+"Best" follows the configured intrinsic preferences and known filename/file
+metadata (including available Plex HDR/DV/Atmos stream facts), not new bitstream
+analysis or a promise of a future release. Provider cache
+APIs, release availability and exact completion can be uncertain. The scheduler
+remains bounded and restart-reconstructible; no permanent monitoring database,
+new dependencies, service or worker was added.
 
 ## Configurable queue retirement
 
