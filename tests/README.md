@@ -33,6 +33,40 @@ chooses among their combined results. Upgrade targets still permit a playable
 fallback when no preferred copy is discovered. This does not guarantee that
 an indexer lists a release, or that a listed NZB can be completed by TorBox.
 
+## TorBox Usenet lifecycle
+
+`test_torbox_usenet.py` exercises the real link/lifecycle functions with mocked
+HTTP responses. Link requests include TorBox's required `token` query parameter;
+logs never print that URL or exception text containing credentials.
+
+- New jobs carry stable request/release identity tokens in their provider name.
+  Existing exact releases are reused rather than submitted again. Owned pending
+  jobs for the same request are checked before provider selection; a missing
+  indexer result can be recovered from complete provider job metadata.
+- Pending/unavailable/uncertain jobs defer that leaf instead of claiming success,
+  submitting fallback copies, setting a permanent downloading marker, or consuming
+  the legacy ignore/retry budget. Other queue leaves continue normally. State is
+  reconstructed from bounded, fresh TorBox inventory; no new database or worker.
+- A completed result needs all requested episode patterns on valid video files,
+  no samples/partial/infected ambiguity, applicable file requirements and actual
+  strict-improvement checks, and a link for every selected file. A link failure
+  is not a "no wanted files" verdict. No synchronous minute-long polling loop.
+- Acquisition **never deletes Usenet jobs**. Failed provider records are retained
+  as restart-safe rejection records, so the same broken release is not recreated
+  every poll. Pre-existing/manual, unknown and mismatched downloads are retained.
+  This is intentional: zero leftovers and zero missed files cannot both be
+  guaranteed when provider metadata is uncertain. Inspect stale/ambiguous jobs
+  manually rather than turning file-name guesses into deletion authority.
+
+New submissions are single-attempt. After an uncertain submission response the
+client refetches inventory and defers, rather than blindly retrying. Provider
+name tokens must be preserved; delayed inventory visibility, concurrent clients,
+or another client renaming/deleting those tokens prevent an absolute exactly-once
+guarantee. Legacy unmarked releases can be reused only by exact title. Quality
+facts still derive from provider/indexer names and sizes, not bitstream probing.
+The existing isolated-single-file **torrent** superseded cleanup is unchanged;
+it does not delete Usenet jobs or automatically sweep unrelated provider items.
+
 ## Queue retirement
 
 `test_retirement.py` covers `off`, recommended-default `target-met` (90-day

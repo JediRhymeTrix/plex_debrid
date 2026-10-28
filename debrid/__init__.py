@@ -7,6 +7,9 @@ tracker = []
 downloading = []
 uncached = 'true'
 
+class Deferred(Exception):
+    """Provider work is pending/uncertain: retry later, not a successful grab."""
+
 # Download Method:
 def download(element, stream=True, query='', force=False):
     downloaded_files = []

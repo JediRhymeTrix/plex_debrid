@@ -912,7 +912,7 @@ class media:
     def watch(self):
         global imdb_scraped
         imdb_scraped = False
-        if getattr(self, '_monitor_managed', False):
+        if getattr(self, '_monitor_managed', False) or getattr(self, '_debrid_deferred', False):
             return
         # Failure to find an optional presentation or quality upgrade must not
         # mark an already-acquired item watched/ignored after initial retries.
@@ -1165,6 +1165,8 @@ class media:
 
     def download(self, retries=0, library=[], parentReleases=[]):
         global imdb_scraped
+        self._debrid_deferred = False
+        self._usenet_preflight = False
         if self.type == 'movie':
             from content import identity
             identity.capture(self)
@@ -1452,6 +1454,8 @@ class media:
             retry = True
             if len(self.Releases) > 0:
                 debrid_downloaded, retry = self.debrid_download()
+            if getattr(self, '_debrid_deferred', False):
+                return debrid_downloaded, True
             if (not debrid_downloaded or retry) and not hasattr(self, "skip_scraping"):
                 if debrid_downloaded:
                     refresh_ = True
@@ -1544,11 +1548,22 @@ class media:
                 ui_print('[download] no episode file matches; leaving coverage unconfirmed', ui_settings.debug)
 
     def debrid_download(self, force=False):
+        if getattr(self, '_debrid_deferred', False):
+            return False, True
         if getattr(self, '_monitor_managed', False) and self.type in ('show', 'season'):
             # Managed work is budgeted per leaf. A pack title alone cannot prove
             # a strict improvement for each already-owned episode; let the
             # existing episode path validate shared parent releases instead.
             return False, True
+        if ('TorBox' in debrid.services.active and any(str(s).casefold() == 'newznab' for s in scraper.services.active)
+                and not getattr(self, '_usenet_preflight', False)):
+            from debrid.services.torbox_usenet import preflight
+            try:
+                preflight(self)
+                self._usenet_preflight = True
+            except debrid.Deferred:
+                self._monitor_retry = self._debrid_deferred = True
+                return False, True
         debrid.check(self)
         self.bitrate()
         if len(self.Releases) > 0:
@@ -1593,24 +1608,26 @@ class media:
                 ver_dld = False
                 for release in copy.deepcopy(self.Releases):
                     self.Releases = [release,]
-                    if hasattr(release, "cached") and len(release.cached) > 0:
-                        if debrid.download(self, stream=True, force=force):
-                            self.downloaded()
-                            if 'imax' in str(release.title).lower():
-                                imax_downloaded = True
-                            downloaded += [True]
-                            ver_dld = True
-                            break
-                    elif not self.type == 'show' and debrid_uncached:
-                        if debrid.download(self, stream=False, force=force):
-                            self.downloaded()
-                            if 'imax' in str(release.title).lower():
-                                imax_downloaded = True
-                            debrid.downloading += [self.query() +
-                                                   ' [' + self.version.name + ']']
-                            downloaded += [True]
-                            ver_dld = True
-                            break
+                    cached = bool(getattr(release, 'cached', []))
+                    if not cached and (self.type == 'show' or not debrid_uncached):
+                        continue
+                    try:
+                        success = debrid.download(self, stream=cached, force=force)
+                    except debrid.Deferred:
+                        # Do not add permanent downloading markers or claim a
+                        # version complete. Other queue items can still proceed.
+                        self._monitor_retry = True
+                        self._debrid_deferred = True
+                        return True in downloaded, True
+                    if success:
+                        self.downloaded()
+                        if 'imax' in str(release.title).lower():
+                            imax_downloaded = True
+                        if not cached:
+                            debrid.downloading += [self.query() + ' [' + self.version.name + ']']
+                        downloaded += [True]
+                        ver_dld = True
+                        break
                 if not ver_dld:
                     downloaded += [False]
                     if self.Releases and getattr(self, '_monitor_managed', False):
